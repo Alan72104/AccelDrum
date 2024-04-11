@@ -1,112 +1,138 @@
 #include <Arduino.h>
+#define LIBCALL_DEEP_SLEEP_SCHEDULER
 #include <DeepSleepScheduler.h>
 #include <LiquidCrystal_I2C.h>
 #include <cstring>
 #include <cstdio>
 #include "main.h"
-#include "display.h"
+#include "Display.h"
 
-LiquidCrystal_I2C lcd = LiquidCrystal_I2C(0x27, 20, 4);
-uint64_t lcdOverlayTimeoutMillis = 0;
-char lcdBufOverlay[lcdBufRows][lcdBufCols] = {0};
-char lcdBufNew[lcdBufRows][lcdBufCols] = {0};
-char lcdBufOld[lcdBufRows][lcdBufCols] = {0};
+Display display;
 
-void displayInit()
+Display::Display() :
+    lcd(0x27, 20, 4),
+    lcdOverlayTimeoutMillis(0),
+    lcdBufOverlay{},
+    lcdBufNew{},
+    lcdBufOld{},
+    backlight(false)
 {
-    for (int row = 0; row < lcdBufRows; row++)
+    init();
+}
+
+void Display::init()
+{
+    for (uint32_t row = 0; row < bufRows; row++)
     {
-        *reinterpret_cast<uint32_t*>(&lcdBufOld[row][lcdCols + 1]) = 0xDEADBEFF;
-        *reinterpret_cast<uint32_t*>(&lcdBufNew[row][lcdCols + 1]) = 0xDEADBEFF;
-        *reinterpret_cast<uint32_t*>(&lcdBufOverlay[row][lcdCols + 1]) = 0xDEADBEFF;
+        *reinterpret_cast<uint32_t*>(&lcdBufOld[row][cols + 1]) = 0xDEADBEFF;
+        *reinterpret_cast<uint32_t*>(&lcdBufNew[row][cols + 1]) = 0xDEADBEFF;
+        *reinterpret_cast<uint32_t*>(&lcdBufOverlay[row][cols + 1]) = 0xDEADBEFF;
     }
     lcd.begin(16, 2);
-    lcd.backlight();
 }
 
-void displayClear()
+void Display::clear()
 {
-    for (int j = 0; j < lcdRows; j++)
-        std::memset(lcdBufNew[j], '\0', lcdCols);
+    for (uint32_t j = 0; j < rows; j++)
+        std::memset(lcdBufNew[j], '\0', cols);
 }
 
-void displayOverlayClear()
+void Display::setBacklight(bool v)
+{
+    if (v)
+        lcd.backlight();
+    else
+        lcd.noBacklight();
+    backlight = v;
+}
+
+bool Display::toggleBacklight()
+{
+    backlight = !backlight;
+    if (backlight)
+        lcd.backlight();
+    else
+        lcd.noBacklight();
+    return backlight;
+}
+
+void Display::overlayClear()
 {
     lcdOverlayTimeoutMillis = 0;
+    for (uint32_t j = 0; j < rows; j++)
+        std::memset(lcdBufOverlay[j], '\0', cols);
 }
 
-static bool displayBufPrintf(char buf[lcdBufRows][lcdBufCols], uint8_t col, uint8_t row, const char* s, va_list args)
+bool Display::bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char* s, va_list args)
 {
-    if (row >= lcdRows || col >= lcdCols)
+    if (row >= rows || col >= cols)
         return false;
-    int fullLen = std::vsnprintf(buf[row] + col, lcdCols + 1 - col, s, args);
-    return fullLen >= 0 && fullLen < lcdCols + 1 - col;
+    uint32_t fullLen = std::vsnprintf(buf[row] + col, cols + 1 - col, s, args);
+    return fullLen >= 0 && fullLen < cols + 1 - col;
 }
 
-bool displayPrintf(uint8_t col, uint8_t row, const char* s, ...)
+bool Display::printf(uint32_t col, uint32_t row, const char* s, ...)
 {
     va_list args;
     va_start(args, s);
-    bool res = displayBufPrintf(lcdBufNew, col, row, s, args);
+    bool res = bufPrintf(lcdBufNew, col, row, s, args);
     va_end(args);
     return res;
 }
 
-bool displayOverlayPrintf(uint8_t col, uint8_t row, uint64_t timeoutPeriodMs, const char* s, ...)
+bool Display::overlayPrintf(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char* s, ...)
 {
     lcdOverlayTimeoutMillis = millis() + timeoutPeriodMs;
     va_list args;
     va_start(args, s);
-    bool res = displayBufPrintf(lcdBufOverlay, col, row, s, args);
+    bool res = bufPrintf(lcdBufOverlay, col, row, s, args);
     va_end(args);
     return res;
 }
 
-static bool displayBufPrint(char buf[lcdBufRows][lcdBufCols], uint8_t col, uint8_t row, const char c)
+bool Display::bufPrint(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char c)
 {
-    if (col >= lcdCols || row >= lcdRows)
+    if (col >= cols || row >= rows)
         return false;
     buf[row][col] = c;
     return true;
 }
 
-bool displayPrint(uint8_t col, uint8_t row, const char c)
+bool Display::print(uint32_t col, uint32_t row, const char c)
 {
-    return displayBufPrint(lcdBufNew, col, row, c);
+    return bufPrint(lcdBufNew, col, row, c);
 }
 
-bool displayOverlayPrint(uint8_t col, uint8_t row, uint64_t timeoutPeriodMs, const char c)
+bool Display::overlayPrint(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char c)
 {
     lcdOverlayTimeoutMillis = millis() + timeoutPeriodMs;
-    return displayBufPrint(lcdBufNew, col, row, c);
+    return bufPrint(lcdBufNew, col, row, c);
 }
 
-bool displayCheckBufIntegrity()
+bool Display::checkBufIntegrity()
 {
-    for (int j = 0; j < lcdRows; j++)
+    for (uint32_t j = 0; j < rows; j++)
     {
-        if (lcdBufOld[j][lcdCols] != '\0' ||
-            lcdBufNew[j][lcdCols] != '\0' ||
-            *reinterpret_cast<uint32_t*>(&lcdBufOld[j][lcdCols + 1]) != 0xDEADBEFF ||
-            *reinterpret_cast<uint32_t*>(&lcdBufNew[j][lcdCols + 1]) != 0xDEADBEFF ||
-            *reinterpret_cast<uint32_t*>(&lcdBufOverlay[j][lcdCols + 1]) != 0xDEADBEFF)
+        if (lcdBufOld[j][cols] != '\0' ||
+            lcdBufNew[j][cols] != '\0' ||
+            *reinterpret_cast<uint32_t*>(&lcdBufOld[j][cols + 1]) != 0xDEADBEFF ||
+            *reinterpret_cast<uint32_t*>(&lcdBufNew[j][cols + 1]) != 0xDEADBEFF ||
+            *reinterpret_cast<uint32_t*>(&lcdBufOverlay[j][cols + 1]) != 0xDEADBEFF)
         {
             lcdOverlayTimeoutMillis = 0;
-            std::strcpy(lcdBufOld[0] + lcdCols - std::strlen("buffer"), "buffer");
-            std::strcpy(lcdBufOld[1] + lcdCols - std::strlen("corrupt"), "corrupt");
-            std::strcpy(lcdBufNew[0] + lcdCols - std::strlen("buffer"), "buffer");
-            std::strcpy(lcdBufNew[1] + lcdCols - std::strlen("corrupt"), "corrupt");
+            std::strcpy(lcdBufOld[0] + cols - std::strlen("buffer"), "buffer");
+            std::strcpy(lcdBufOld[1] + cols - std::strlen("corrupt"), "corrupt");
+            std::strcpy(lcdBufNew[0] + cols - std::strlen("buffer"), "buffer");
+            std::strcpy(lcdBufNew[1] + cols - std::strlen("corrupt"), "corrupt");
             return false;
         }
     }
     return true;
 }
 
-void displayUpdate()
+void Display::update()
 {
-    scheduler.scheduleDelayed(displayUpdate, 100);
-    
-    bool corrupted = !displayCheckBufIntegrity();
+    bool corrupted = !checkBufIntegrity();
     if (corrupted)
     {
         analogWrite(ledPinDebug, debugLedBrightness);
@@ -117,17 +143,17 @@ void displayUpdate()
         while (true);
     }
     else if (lcdOverlayTimeoutMillis ||
-        std::memcmp(lcdBufOld, lcdBufNew, (lcdBufCols * lcdBufRows)) != 0)
+        std::memcmp(lcdBufOld, lcdBufNew, (bufCols * bufRows)) != 0)
     {
-        for (int j = 0; j < lcdBufRows; j++)
-            std::memcpy(lcdBufOld[j], lcdBufNew[j], lcdCols);
+        for (uint32_t j = 0; j < bufRows; j++)
+            std::memcpy(lcdBufOld[j], lcdBufNew[j], cols);
 
         if (lcdOverlayTimeoutMillis)
         {
             if (millis() < lcdOverlayTimeoutMillis)
             {
-                for (int j = 0; j < lcdBufRows; j++)
-                    for (int i = 0; i < lcdCols; i++)
+                for (uint32_t j = 0; j < bufRows; j++)
+                    for (uint32_t i = 0; i < cols; i++)
                     {
                         const char car = lcdBufOverlay[j][i];
                         if (car != '\0')
@@ -135,7 +161,7 @@ void displayUpdate()
                     }
             }
             else
-                displayOverlayClear();
+                overlayClear();
         }
 
         lcd.setCursor(0, 0);
@@ -143,4 +169,10 @@ void displayUpdate()
         lcd.setCursor(0, 1);
         lcd.print(lcdBufOld[1]);
     }
+}
+
+void Display::run()
+{
+    scheduler.scheduleDelayed(this, 100);
+    update();
 }

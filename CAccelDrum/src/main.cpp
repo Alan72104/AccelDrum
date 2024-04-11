@@ -12,7 +12,8 @@
 #include <DeepSleepScheduler.h>
 #include <LiquidCrystal_I2C.h>
 #include "main.h"
-#include "display/display.h"
+#include "Display/Display.h"
+#include "Serial/SerialManager.h"
 
 // class default I2C address is 0x68
 // specific I2C addresses may be passed as a parameter here
@@ -71,8 +72,6 @@ uint64_t lastBlinkMillis = 0;
 Bounce2::Button btn1 = Bounce2::Button();
 Bounce2::Button btn2 = Bounce2::Button();
 VectorFloat accumulatedPos = VectorFloat();
-CRC32 crcIn;
-CRC32 crcOut;
 
 // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -97,12 +96,13 @@ uint8_t teapotPacket[14] = { '$', 0x02, 0,0, 0,0, 0,0, 0,0, 0x00, 0x00, '\r', '\
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady() {
     mpuInterrupt = true;
-    displayPrint(lcdCols - 1, 0, '+');
+    display.print(display.cols - 1, 0, '+');
 }
 
 void setup() {
     pinMode(ledPinDebug, OUTPUT);
     analogWrite(ledPinDebug, debugLedBrightness);
+
     // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
@@ -111,12 +111,10 @@ void setup() {
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
         Fastwire::setup(400, true);
     #endif
-
-    // initialize serial communication
-    // (115200 chosen because it is required for Teapot Demo output, but it's
-    // really up to you depending on your project)
-    Serial.begin(1152000);
-    while (!Serial); // wait for Leonardo enumeration, others continue immediately
+    
+    display.init();
+    display.setBacklight(true);
+    serial.init();
 
     // initialize device
     // Serial.println(F("Initializing I2C devices..."));
@@ -130,7 +128,6 @@ void setup() {
 
     // wait for ready
     // Serial.println(F("\nSend any character to begin DMP programming and demo: "));
-    while (Serial.available() && Serial.read()); // empty buffer
     // while (!Serial.available());                 // wait for data
     // while (Serial.available() && Serial.read()); // empty buffer again
 
@@ -191,8 +188,6 @@ void setup() {
     btn2.interval(5);
     btn2.setPressedState(LOW);
 
-    displayInit();
-
     analogWrite(ledPinDebug, 0);
 }
 
@@ -206,14 +201,13 @@ void processDmpPacket()
     if (!mpu.dmpGetCurrentFIFOPacket(fifoBuffer))
         return;
     mpuInterrupt = false;
-    displayPrint(lcdCols - 1, 0, '\0');
+    display.print(display.cols - 1, 0, '\0');
 
     bool sendData = false;
     sendData = true;
 
     if (sendData)
     {
-        static_assert(sizeof(SerialPacket) == 64, "Struct size was modified");
         mpu.dmpGetQuaternion(&q, fifoBuffer);
         mpu.dmpGetAccel(&aa, fifoBuffer);
         mpu.dmpGetGravity(&gravity, &q);
@@ -222,37 +216,32 @@ void processDmpPacket()
         memcpy(&aaWorld, &aaReal, sizeof(VectorInt16)); // World accel
         aaWorld.rotate(&q);
         uint64_t micro = micros();
-        SerialPacket packet
+        AccelPacket packet
         {
-            .inner =
-            {
-                .deltaMicros = micro - lastSendMicros,
-                .ax = aaWorld.x * mpu.get_acce_resolution(),
-                .ay = aaWorld.y * mpu.get_acce_resolution(),
-                .az = aaWorld.z * mpu.get_acce_resolution(),
-                .gx = q.x * mpu.get_gyro_resolution(),
-                .gy = q.y * mpu.get_gyro_resolution(),
-                .gz = q.z * mpu.get_gyro_resolution(),
-                .gw = q.w * mpu.get_gyro_resolution(),
-                .ex = euler[0],
-                .ey = euler[1],
-                .ez = euler[2],
-            },
-            .magic = 0xDEADBEEF80085069
+            .deltaMicros = micro - lastSendMicros,
+            .ax = aaWorld.x * mpu.get_acce_resolution(),
+            .ay = aaWorld.y * mpu.get_acce_resolution(),
+            .az = aaWorld.z * mpu.get_acce_resolution(),
+            .gx = q.x * mpu.get_gyro_resolution(),
+            .gy = q.y * mpu.get_gyro_resolution(),
+            .gz = q.z * mpu.get_gyro_resolution(),
+            .gw = q.w * mpu.get_gyro_resolution(),
+            .ex = euler[0],
+            .ey = euler[1],
+            .ez = euler[2],
         };
-        crcOut.restart();
-        crcOut.add(reinterpret_cast<uint8_t*>(&packet.inner), sizeof(packet.inner));
-        packet.crc32 = crcOut.calc();
+        lastSendMicros = micro;
+        serial.send(PacketType::Accel, &packet);
         // displayPrintf(0, "% 5.0f% 5.0f% 5.0f",
         //     packet.gx / PI * 180,
         //     packet.gy / PI * 180,
         //     packet.gz / PI * 180);
-        displayClear();
-        displayPrintf(0, 0, "% 5.0f% 5.0f% 5.0f",
+        display.clear();
+        display.printf(0, 0, "% 5.0f% 5.0f% 5.0f",
             aaWorld.x * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
             aaWorld.y * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
             aaWorld.z * mpu.get_acce_resolution() * mpu.get_acce_resolution());
-        displayPrintf(0, 1, "% 5.0f% 5.0f% 5.0f",
+        display.printf(0, 1, "% 5.0f% 5.0f% 5.0f",
             euler[0] / PI * 180,
             euler[1] / PI * 180,
             euler[2] / PI * 180);
@@ -264,8 +253,6 @@ void processDmpPacket()
         //     accumulatedPos.x,
         //     accumulatedPos.y,
         //     accumulatedPos.z);
-        lastSendMicros = micro;
-        Serial.write((byte*)&packet, sizeof(packet));
         return;
     }
     else
@@ -362,43 +349,23 @@ void updateBtns()
     {
         // digitalWrite(LED_BUILTIN, blinkState = true);
         accumulatedPos = VectorFloat();
+        bool bl = display.toggleBacklight();
+        display.overlayClear();
+        display.overlayPrintf(0, 0, 1000, bl ? "Backlight on" : "Backlight off");
     }
     if (btn2.pressed())
     {
         // digitalWrite(LED_BUILTIN, blinkState = false);
-        uint64_t arr[] =
-        {
-            0xDEADBEEF80085069,
-            0xABCDEF0123456789,
-            0x6666999904208787,
-            0xDEADBEEF80085069,
-        };
-        crcOut.restart();
-        crcOut.add(reinterpret_cast<uint8_t*>(&arr), sizeof(arr));
-        displayPrintf(0, 0, "%d", crcOut.calc());
-
         SerialPacket packet
         {
-            .inner =
-            {
-            },
             .crc32 = 0x6969,
             .magic = 0xDEADBEEF80085069
         };
-        Serial.write((byte*)&packet, sizeof(packet));
+        serial.sendNative(packet);
 
-        displayOverlayClear();
-        displayOverlayPrintf(0, 0, 1000, "Garbage crc");
-        displayOverlayPrintf(lcdCols - std::strlen("packet sent"), 1, 1000, "packet sent");
-    }
-}
-
-void receivePacket()
-{
-    scheduler.schedule(receivePacket);
-    if (Serial.available())
-    {
-
+        display.overlayClear();
+        display.overlayPrintf(0, 0, 1000, "Garbage crc");
+        display.overlayPrintf(display.cols - std::strlen("packet sent"), 1, 1000, "packet sent");
     }
 }
 
@@ -440,9 +407,10 @@ void loop() {
     scheduler.setSupervisionCallback(new SupervisionCallback());
     scheduler.schedule(updateBtns);
     scheduler.schedule(processDmpPacket);
-    scheduler.schedule(receivePacket);
     scheduler.schedule(blinkLed);
-    scheduler.schedule(displayUpdate);
+    scheduler.schedule(&display);
+    scheduler.schedule(&serial);
+    // scheduler.schedule(static_cast<Runnable*>(&display));
     scheduler.execute();
 }
 

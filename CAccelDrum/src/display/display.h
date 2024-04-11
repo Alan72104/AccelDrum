@@ -1,47 +1,72 @@
 #pragma once
 #include <Arduino.h>
 #include <LiquidCrystal_I2C.h>
+#define LIBCALL_DEEP_SLEEP_SCHEDULER
+#include <DeepSleepScheduler.h>
 
-constexpr uint8_t lcdCols = 16;
-constexpr uint8_t lcdBufCols = lcdCols + 1 + sizeof(uint32_t);
-constexpr uint8_t lcdRows = 2;
-constexpr uint8_t lcdBufRows = lcdRows;
-extern LiquidCrystal_I2C lcd;
-extern uint64_t lcdOverlayTimeoutMillis;
-extern char lcdBufOverlay[lcdBufRows][lcdBufCols]; // '\0' in the overlay means transparent
-extern char lcdBufNew[lcdBufRows][lcdBufCols];
-extern char lcdBufOld[lcdBufRows][lcdBufCols];
+class Display;
+extern Display display;
 
-// Sets the magic numbers at the end of each row and starts the driver
-void displayInit();
+class Display : public Runnable
+{
+public:
+    static constexpr uint32_t cols = 16;
+    static constexpr uint32_t bufCols = cols + 1 + sizeof(uint32_t);
+    static constexpr uint32_t rows = 2;
+    static constexpr uint32_t bufRows = rows;
 
-// Return true if all 3 dispaly buffers' trailing null char and magic number aren't overridden,
-// when corruption is detected, also writes "buffer" "corrupt" to the end,
-// and resets the trailing null char and magic number,
-// execution should not continue after the corruption
-bool displayCheckBufIntegrity();
+    Display();
 
-// Sends update to the display when needed, also checks for buffer corruption
-void displayUpdate();
+    // Sets the magic numbers at the end of each row and starts the driver
+    void init();
 
-// Clears the display
-void displayClear();
+    virtual void run() override;
 
-// Returns true if col and row and final string length are within the range,
-// string is truncated if length is longer than cols
-bool displayPrintf(uint8_t col, uint8_t row, const char* s, ...);
+    // Return true if all 3 dispaly buffers' trailing null char and magic number aren't overridden,
+    // when corruption is detected, also writes "buffer" "corrupt" to the end,
+    // and resets the trailing null char and magic number,
+    // execution should not continue after the corruption
+    bool checkBufIntegrity();
 
-// Returns true if col and row are within the range
-bool displayPrint(uint8_t col, uint8_t row, const char c);
+    // Sends update to the display when needed, also checks for buffer corruption
+    void update();
 
-// Sets everything in the overlay to '\0' and clears the timeout
-void displayOverlayClear();
+    // Clears the display
+    void clear();
 
-// Returns true if col and row and final string length are within the range,
-// string is truncated if length is longer than cols
-// Display will be updated constantly before the timeout elapses
-bool displayOverlayPrintf(uint8_t col, uint8_t row, uint64_t timeoutPeriodMs, const char* s, ...);
+    // Sets the backlight
+    void setBacklight(bool v);
 
-// Returns true if col and row are within the range
-// Display will be updated constantly before the timeout elapses
-bool displayOverlayPrint(uint8_t col, uint8_t row, uint64_t timeoutPeriodMs, const char c);
+    // Toggles the backlight
+    bool toggleBacklight();
+
+    // Returns true if col and row and final string length are within the range,
+    // string is truncated if length is longer than cols
+    bool printf(uint32_t col, uint32_t row, const char* s, ...);
+
+    // Returns true if col and row are within the range
+    bool print(uint32_t col, uint32_t row, const char c);
+
+    // Sets everything in the overlay to '\0' and clears the timeout
+    void overlayClear();
+
+    // Returns true if col and row and final string length are within the range,
+    // string is truncated if length is longer than cols
+    // Display will be updated constantly before the timeout elapses
+    bool overlayPrintf(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char* s, ...);
+
+    // Returns true if col and row are within the range
+    // Display will be updated constantly before the timeout elapses
+    bool overlayPrint(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char c);
+
+private:
+    LiquidCrystal_I2C lcd;
+    uint64_t lcdOverlayTimeoutMillis;
+    char lcdBufOverlay[bufRows][bufCols]; // '\0' in the overlay means transparent
+    char lcdBufNew[bufRows][bufCols];
+    char lcdBufOld[bufRows][bufCols];
+    bool backlight;
+
+    bool bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char* s, va_list args);
+    bool bufPrint(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char c);
+};
