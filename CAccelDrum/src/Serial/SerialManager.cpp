@@ -4,21 +4,20 @@
 
 SerialManager serial;
 
-SerialManager::SerialManager() :
-    parsingQueue(),
-    inboundQueue(),
-    crcOut(),
-    crcIn(),
-    lastLong(0),
-    packetCount(0),
-    corruptedPacketCount(0),
-    inboundQueueMutex()
+SerialManager::SerialManager() : parsingQueue(),
+                                 inboundQueue(),
+                                 crcOut(),
+                                 crcIn(),
+                                 lastLong(0),
+                                 packetCount(0),
+                                 corruptedPacketCount(0),
+                                 inboundQueueMutex()
 {
 }
 
 void SerialManager::init()
 {
-    Serial.begin(1152000);
+    Serial.begin(1000000);
     while (!Serial)
         ;
     while (Serial.available() && Serial.read())
@@ -31,30 +30,9 @@ void SerialManager::run()
     receive();
 }
 
-// template<typename T>
-// requires (sizeof(T) == sizeof(SerialPacket::inner))
-// void SerialManager::send(PacketType type, T& packet)
-void SerialManager::send(PacketType type, void* innerGeneric)
+void SerialManager::sendNative(SerialPacket &packet)
 {
-    SerialPacket::Inner& inner = *reinterpret_cast<SerialPacket::Inner*>(innerGeneric);
-    if (!(type > PacketType::None && type < PacketType::Count))
-        return;
-    SerialPacket outPacket
-    {
-        .type = type,
-        .inner = inner,
-        .magic = SerialPacket::magicExpected
-    };
-    crcOut.restart();
-    crcOut.add(reinterpret_cast<uint8_t*>(&outPacket.type), sizeof(outPacket.type));
-    crcOut.add(reinterpret_cast<uint8_t*>(&outPacket.inner), sizeof(outPacket.inner));
-    outPacket.crc32 = crcOut.calc();
-    sendNative(outPacket);
-}
-
-void SerialManager::sendNative(SerialPacket& packet)
-{
-    Serial.write((byte*)&packet, sizeof(packet));
+    Serial.write(reinterpret_cast<byte *>(&packet), sizeof(packet));
 }
 
 void SerialManager::receive()
@@ -78,17 +56,17 @@ void SerialManager::receive()
         {
             SerialPacket packet;
             for (int i = 0; i < sizeof(SerialPacket); i++)
-                reinterpret_cast<byte*>(&packet)[i] = parsingQueue.pop();
+                reinterpret_cast<byte *>(&packet)[i] = parsingQueue.pop();
             tryEnqueueInbound(packet);
         }
     }
 }
 
-bool SerialManager::tryEnqueueInbound(SerialPacket& packet)
+bool SerialManager::tryEnqueueInbound(SerialPacket &packet)
 {
     crcIn.restart();
-    crcIn.add(reinterpret_cast<uint8_t*>(&packet.type), sizeof(packet.type));
-    crcIn.add(reinterpret_cast<uint8_t*>(&packet.inner), sizeof(packet.inner));
+    crcIn.add(reinterpret_cast<uint8_t *>(&packet.type), sizeof(packet.type));
+    crcIn.add(reinterpret_cast<uint8_t *>(&packet.inner), sizeof(packet.inner));
     uint32_t crc = crcIn.calc();
     if (crc != packet.crc32)
     {
@@ -100,9 +78,9 @@ bool SerialManager::tryEnqueueInbound(SerialPacket& packet)
     return true;
 }
 
-template<typename T>
-requires (sizeof(T) == sizeof(SerialPacket::inner))
-bool SerialManager::tryDequeueInbound(PacketType type, T& outPacket)
+template <typename T>
+    requires(sizeof(T) == sizeof(SerialPacket::inner))
+bool SerialManager::tryDequeueInbound(PacketType type, T &outPacket)
 {
     if (inboundQueue.size() > 0)
     {

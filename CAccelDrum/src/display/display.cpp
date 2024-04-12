@@ -4,8 +4,10 @@
 #include <LiquidCrystal_I2C.h>
 #include <cstring>
 #include <cstdio>
+#include <string_view>
 #include "main.h"
 #include "Display.h"
+#include "Utils/Utils.h"
 
 Display display;
 
@@ -168,6 +170,12 @@ void Display::update()
         lcd.print(lcdBufOld[0]);
         lcd.setCursor(0, 1);
         lcd.print(lcdBufOld[1]);
+
+        Utils::printToPackets("New display update:\n");
+        Utils::printToPackets(std::string_view(lcdBufOld[0], cols));
+        Utils::printToPackets("\n");
+        Utils::printToPackets(std::string_view(lcdBufOld[1], cols));
+        Utils::printToPackets("\n");
     }
 }
 

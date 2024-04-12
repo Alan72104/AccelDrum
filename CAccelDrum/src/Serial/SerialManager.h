@@ -19,11 +19,11 @@ public:
 
     virtual void run() override;
 
-    // template<typename T>
-    // requires (sizeof(T) == sizeof(SerialPacket::inner))
-    // void send(PacketType type, T& packet);
+    template<typename T>
+    requires (sizeof(T) == sizeof(SerialPacket::inner))
+    void send(PacketType type, T& packet);
 
-    void send(PacketType type, void* packet);
+    // void send(PacketType type, void* innerGeneric, size_t innerSize);
 
     void sendNative(SerialPacket& packet);
 
@@ -48,3 +48,23 @@ private:
     void receive();
     bool tryEnqueueInbound(SerialPacket& packet);
 };
+
+template<typename T>
+requires (sizeof(T) == sizeof(SerialPacket::inner))
+void SerialManager::send(PacketType type, T& packet)
+// void SerialManager::send(PacketType type, void *innerGeneric, size_t innerSize)
+{
+    // SerialPacket::Inner &inner = *reinterpret_cast<SerialPacket::Inner *>(innerGeneric);
+    SerialPacket::Inner &inner = *reinterpret_cast<SerialPacket::Inner *>(&packet);
+    if (!(type > PacketType::None && type < PacketType::Count))
+        return;
+    SerialPacket outPacket{
+        .type = type,
+        .inner = inner,
+        .magic = SerialPacket::magicExpected};
+    crcOut.restart();
+    crcOut.add(reinterpret_cast<uint8_t *>(&outPacket.type), sizeof(outPacket.type));
+    crcOut.add(reinterpret_cast<uint8_t *>(&outPacket.inner), sizeof(outPacket.inner));
+    outPacket.crc32 = crcOut.calc();
+    sendNative(outPacket);
+}

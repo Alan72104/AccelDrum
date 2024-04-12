@@ -159,12 +159,15 @@ public class Mesh : IDisposable
         if (Dirty)
         {
             Dirty = false;
-            Vertex[] verts = vertices.ToArray();
             int vertSize = Marshal.SizeOf<Vertex>();
-            GL.BufferData(BufferTarget.ArrayBuffer, verts.Length * vertSize, verts, BufferUsageHint.StreamDraw);
-            uint[]? idxs = indexes.Count > 0 ? indexes.ToArray() : null;
-            if (idxs is not null)
-                GL.BufferData(BufferTarget.ElementArrayBuffer, idxs.Length * sizeof(uint), idxs, BufferUsageHint.StreamDraw);
+            Span<Vertex> verts = CollectionsMarshal.AsSpan(vertices);
+            GL.BufferData(BufferTarget.ArrayBuffer, verts.Length * vertSize, ref verts.GetPinnableReference(), BufferUsageHint.StreamDraw);
+            if (HasIndexes)
+            {
+                Span<uint> idxs = CollectionsMarshal.AsSpan(indexes);
+                GL.BufferData(BufferTarget.ElementArrayBuffer, idxs.Length * sizeof(uint), ref idxs.GetPinnableReference(), BufferUsageHint.StreamDraw);
+            }
+            // Should use Unsafe offsets since they are managed data
             GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, vertSize, 0);
             GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, vertSize, Marshal.OffsetOf<Vertex>(nameof(Vertex.Color)));
             GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, vertSize, Marshal.OffsetOf<Vertex>(nameof(Vertex.Tex)));
@@ -176,17 +179,13 @@ public class Mesh : IDisposable
         }
         Texture?.Bind();
 
-        //if (DirtyModel)
-        //{
         Matrix4 model = Matrix4.Identity;
         model *= Matrix4.CreateTranslation(-origin);
         model *= Matrix4.CreateFromQuaternion(rotationQuat);
         model *= Matrix4.CreateTranslation(position);
         Shader.SetMatrix4("model", false, ref model);
-        //    DirtyModel = false;
-        //}
 
-        if (indexes.Count > 0)
+        if (HasIndexes)
             GL.DrawElements(PrimitiveType, indexes.Count, DrawElementsType.UnsignedInt, 0);
         else
             GL.DrawArrays(PrimitiveType, 0, vertices.Count);
@@ -211,5 +210,8 @@ public class Mesh : IDisposable
         if (vao != 0)
             GL.DeleteVertexArray(vao);
         vao = 0;
+        if (ebo != 0)
+            GL.DeleteBuffer(ebo);
+        ebo = 0;
     }
 }

@@ -59,7 +59,7 @@ public class Window : GameWindow
     private Texture textureContainer = null!;
     private Texture textureCea7d = null!;
     private bool demoWindow = false;
-    private Accel accel = null!;
+    private AccelDevice accel = null!;
 
     public Window() : base(
         GameWindowSettings.Default,
@@ -118,7 +118,7 @@ public class Window : GameWindow
         this.VSync = VSyncMode.On;
         //this.UpdateFrequency = 70.0;
 
-        accel = new Accel(meshManager);
+        accel = new AccelDevice(meshManager);
         //DebugRenderer.Ins.AddMeshes(
         //[
         //    meshMain,

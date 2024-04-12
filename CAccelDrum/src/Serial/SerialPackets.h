@@ -1,18 +1,20 @@
 #pragma once
 #include <Arduino.h>
-#include "../Utils/Utils.h"
+#include <array>
+#include "Utils/Utils.h"
 
 enum class PacketType : uint32_t
 {
     None,
     Accel,
-    Count,
+    Text,
+    Count
 };
 
 struct SerialPacket
 {
-    static constexpr uint32_t sizeExpected = 64;
-    static constexpr uint32_t sizeInner = 48;
+    static constexpr size_t sizeExpected = 64;
+    static constexpr size_t sizeInner = 48;
     static constexpr uint64_t magicExpected = 0xDEADBEEF80085069;
     static constexpr uint64_t magicExpectedReversed = Utils::reverseBytewise(magicExpected);
 
@@ -42,4 +44,11 @@ struct AccelPacket
     float ax, ay, az;
     float gx, gy, gz, gw;
     float ex, ey, ez;
+} __attribute__((packed));
+
+struct TextPacket
+{
+    static constexpr size_t sizeStr = SerialPacket::sizeInner - sizeof(uint32_t);
+    uint32_t length;
+    std::array<char, sizeStr> string;
 } __attribute__((packed));

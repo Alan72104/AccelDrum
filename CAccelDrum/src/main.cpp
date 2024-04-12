@@ -231,7 +231,8 @@ void processDmpPacket()
             .ez = euler[2],
         };
         lastSendMicros = micro;
-        serial.send(PacketType::Accel, &packet);
+        // serial.send(PacketType::Accel, &packet, sizeof(packet));
+        serial.send(PacketType::Accel, packet);
         // displayPrintf(0, "% 5.0f% 5.0f% 5.0f",
         //     packet.gx / PI * 180,
         //     packet.gy / PI * 180,
@@ -352,6 +353,8 @@ void updateBtns()
         bool bl = display.toggleBacklight();
         display.overlayClear();
         display.overlayPrintf(0, 0, 1000, bl ? "Backlight on" : "Backlight off");
+        std::string str = Utils::stringSprintf("Test string %d\n", 1);
+        Utils::printToPackets(str);
     }
     if (btn2.pressed())
     {

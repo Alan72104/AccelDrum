@@ -1,4 +1,5 @@
-﻿using AccelDrum.Game.Extensions;
+﻿using AccelDrum.Game.Accel;
+using AccelDrum.Game.Extensions;
 using AccelDrum.Game.Graphics;
 using AccelDrum.Game.Serial;
 using AccelDrum.Game.Utils;
@@ -9,22 +10,13 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 
 namespace AccelDrum.Game;
 
-public class Accel : IDisposable
+public class AccelDevice : IDisposable
 {
-    [StructLayout(LayoutKind.Sequential, Pack = 1)]
-    private readonly record struct AccelPacket
-    (
-        ulong DeltaMicros,
-        Vector3 Accel,
-        Quaternion Gyro,
-        Vector3 GyroEuler,
-        int padding
-    );
-
     private string[] portNames = [];
     private SerialManager serial = new();
     private SerialPacket<AccelPacket>? latestDataNative = null;
@@ -35,8 +27,10 @@ public class Accel : IDisposable
     private Vector3[] serialRotHistory = new Vector3[500];
     private Timer2 timer = new Timer2(1000 / 10);
     private Vector3 velocity = new();
+    private SortedDictionary<AccelPacketType, int> packetCounts = new();
+    private StringBuilder sbFromAccel = new();
 
-    public Accel(MeshManager meshManager)
+    public AccelDevice(MeshManager meshManager)
     {
         this.meshManager = meshManager;
 
@@ -53,37 +47,74 @@ public class Accel : IDisposable
     {
         serial.Update();
 
-        while (serial.TryDequeueInboundNative(out SerialPacket<AccelPacket> native))
-        {
-            latestDataNative = native with
-            {
-                Inner = (latestData = native.Inner with
-                {
-                    Accel = ConvertAxes(native.Inner.Accel),
-                    Gyro = ConvertAxes(native.Inner.Gyro),
-                    GyroEuler = ConvertAxes(native.Inner.GyroEuler),
-                }).Value
-            };
-
-            AccelPacket data = latestData.Value;
-            if (data.DeltaMicros <= 1_000_000)
-            {
-                //meshTestCube.Rotation += data.Gyro / MathF.PI * 180 * (data.DeltaMicro / 1_000_000f);
-                meshTestCube.RotationQuat = data.Gyro;
-                //meshTestCube.Rotation = data.GyroEuler / MathF.PI * 180;
-                float secs = data.DeltaMicros / 1_000_000.0f;
-                velocity += data.Accel * secs;
-                meshTestCube.Position += data.Accel * secs * secs * 10;
-                //meshTestCube.Position += velocity * secs;
-            }
-        }
+        if (serial.Connected)
+            ReceivePackets();
 
         if (timer.CheckAndResetIfElapsed())
         {
             Array.ConstrainedCopy(serialRotHistory, 1, serialRotHistory, 0, serialRotHistory.Length - 1);
-            //Buffer.Copy(serialRotHistory, Marshal.SizeOf<Vector3>(),
-            //    serialRotHistory, 0, (serialRotHistory.Length - 1) * Marshal.SizeOf<Vector3>());
             serialRotHistory[serialRotHistory.Length - 1] = meshTestCube.Rotation;
+        }
+    }
+
+    private void ReceivePackets()
+    {
+        while (serial.TryDequeueInboundNative(out SerialPacket native))
+        {
+            AccelPacketType type = (AccelPacketType)native.Type;
+            if (packetCounts.ContainsKey(type))
+                packetCounts[type]++;
+            else
+                packetCounts[type] = 1;
+            switch (type)
+            {
+                case AccelPacketType.Accel:
+                    {
+                        AccelPacket p = native.GetInnerAs<AccelPacket>();
+                        p = p with
+                        {
+                            Accel = ConvertAxes(p.Accel),
+                            Gyro = ConvertAxes(p.Gyro),
+                            GyroEuler = ConvertAxes(p.GyroEuler),
+                        };
+                        latestDataNative = SerialPacket<AccelPacket>.RefFromUntyped(ref native);
+                        latestData = p;
+                        if (p.DeltaMicros <= 1_000_000)
+                        {
+                            meshTestCube.RotationQuat = p.Gyro;
+                            float secs = p.DeltaMicros / 1_000_000.0f;
+                            velocity += p.Accel * secs;
+                            meshTestCube.Position += p.Accel * secs * secs * 10;
+                        }
+                        break;
+                    }
+                case AccelPacketType.Text:
+                    {
+                        TextPacket p = native.GetInnerAs<TextPacket>();
+                        if (p.Length > 0)
+                        {
+                            ReadOnlySpan<byte> span = MemoryMarshal.CreateReadOnlySpan(ref p.Str[0], (int)p.Length);
+                            string str = Encoding.UTF8.GetString(span);
+                            sbFromAccel.Append(str);
+                            Console.WriteLine($"Text received len: {p.Length} content: {str}");
+                            while (sbFromAccel.Length > 128)
+                            {
+                                int i = sbFromAccel.ToString().IndexOf('\n');
+                                if (i == -1)
+                                    break;
+                                Console.WriteLine($"Removing {i} sb len: {sbFromAccel.Length    }");
+                                if (sbFromAccel.Length > 150)
+                                    sbFromAccel.Remove(0, sbFromAccel.Length - 150);
+                                else
+                                    sbFromAccel.Remove(0, i + 1);
+                            }
+                        }
+                        break;
+                    }
+                default:
+                    Console.WriteLine($"Unknown packet type {native.Type}");
+                    break;
+            }
         }
     }
 
@@ -113,7 +144,7 @@ public class Accel : IDisposable
                 {
                     if (serial.Connected)
                         serial.Disconnect();
-                    serial.Connect(name, 1152000);
+                    serial.Connect(name, 1000000);
                 }
             }
 
@@ -128,8 +159,6 @@ public class Accel : IDisposable
                 meshTestCube.Position = new Vector3(0, 2, 0);
                 velocity = Vector3.Zero;
             }
-            //ImGui.SameLine();
-            //if (ImGui.Button("velocity"))
 
             ImGui.Text("Cube vel");
             ImGui.SameLine();
@@ -165,22 +194,35 @@ public class Accel : IDisposable
                 ImGui.EndTable();
             }
 
+            ImGui.Text("Packet counts");
+            ImGui.SameLine();
+            if (ImGui.BeginTable("tablePacketCount", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+            {
+                foreach (var (type, val) in packetCounts)
+                {
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{type}");
+                    ImGui.TableNextColumn();
+                    ImGui.Text($"{val:n0}");
+                }
+                ImGui.EndTable();
+            }
+
+            ImGui.Text($"Corrupted count: {serial.CorruptedPacketCount}");
+
+
+            ImGui.AlignTextToFramePadding();
+            ImGui.Text("String from accel");
+            ImGui.SameLine();
+            if (ImGui.Button("Clear"))
+                sbFromAccel.Clear();
+            string strFromAccel = sbFromAccel.ToString().Replace('\0', ' ');
+            ImGui.Text(strFromAccel);
+
             if (serial.Connected)
             {
                 if (latestData.HasValue)
                 {
-                    ImGui.Text("Packet count");
-                    ImGui.SameLine();
-                    if (ImGui.BeginTable("tablePacketCount", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-                    {
-                        ImGui.TableNextColumn();
-                        ImGui.Text($"{serial.PacketCount:n0}");
-                        ImGui.TableNextColumn();
-                        ImGui.Text($"{1000000 / latestData.Value.DeltaMicros.RealAndNotZeroOr1()}/s");
-                        ImGui.EndTable();
-                    }
-
-                    ImGui.Text($"Corrupted count: {serial.CorruptedPacketCount}");
 
                     ImGui.Text("Latest packet");
                     if (ImGui.BeginTable("tableAccelData", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
@@ -282,7 +324,7 @@ public class Accel : IDisposable
         //return (q * Quaternion.FromEulerAngles(new Vector3(-90, 90, -90) / 180 * MathF.PI)).Normalized();
         //return (Quaternion.FromEulerAngles(temp / 180 * MathF.PI) * q).Normalized();
         //return (y_to_neg_x * q * z_to_y * x_to_neg_z).Normalized();
-        return (new Quaternion(q.Y, -q.Z, -q.X, -q.W)).Normalized();
+        return new Quaternion(q.Y, -q.Z, -q.X, -q.W).Normalized();
         //return (q).Normalized();
         //return q;
     }
@@ -294,7 +336,7 @@ public class Accel : IDisposable
         //return new Vector3(-v.Y, v.Z, -v.X);
     }
 
-    ~Accel()
+    ~AccelDevice()
     {
         Dispose();
     }

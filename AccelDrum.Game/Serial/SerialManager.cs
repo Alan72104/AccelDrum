@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.IO.Hashing;
 using System.IO.Ports;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -11,7 +10,6 @@ namespace AccelDrum.Game.Serial;
 
 public class SerialManager : IDisposable
 {
-
     public bool Connected => serial is not null;
     public string PortName => Connected ? serial!.PortName : "";
     public ulong Magic => SerialPacket.MagicExpected;
@@ -20,16 +18,17 @@ public class SerialManager : IDisposable
     public int BytesRead => bytesRead;
     private SerialPort? serial;
     private Queue<byte> parsingQueue = new();
+    private ConcurrentQueue<SerialPacket> inboundQueue = new();
     private ulong lastLong = 0;
-    private ConcurrentQueue<SerialPacket> inboundPackets = new();
+    //private ConcurrentQueue<SerialPacket> outboundPackets = new(); // Outbound queue?
     private volatile int bytesRead = 0;
-    private Crc32 crcIn = new();
+    private byte[] outboundBuffer = new byte[SerialPacket.Size];
 
     public SerialManager()
     {
         if (SerialPacket.Size != SerialPacket.SizeExpected)
         {
-            throw new NotSupportedException($"Struct size was modified {SerialPacket.SizeExpected} => {SerialPacket.Size}");
+            throw new NotSupportedException($"Packet size was modified {SerialPacket.SizeExpected} => {SerialPacket.Size}");
         }
     }
 
@@ -63,7 +62,7 @@ public class SerialManager : IDisposable
         //serial!.ErrorReceived -= OnSerialErrorReceived;
         serial!.Close();
         serial = null;
-        inboundPackets.Clear();
+        inboundQueue.Clear();
         PacketCount = 0;
         CorruptedPacketCount = 0;
         bytesRead = 0;
@@ -111,68 +110,69 @@ public class SerialManager : IDisposable
         Console.WriteLine($"Serial errored: {e.EventType}");
     }
 
-    private Timer2 t = new Timer2(500).Start();
-
     private bool TryEnqueueInbound(ref SerialPacket p)
     {
-        unsafe
+        uint crc = p.GetCrc32();
+        if (crc != p.Crc32)
         {
-            fixed (byte* ptr = p.Inner)
-            {
-                byte[] hash = Crc32.Hash(new ReadOnlySpan<byte>(ptr, SerialPacket.SizeInner));
-                uint crc = BitConverter.ToUInt32(hash);
-                if (crc != p.Crc32)
-                {
-                    CorruptedPacketCount++;
-                    if (t.CheckAndResetIfElapsed())
-                    {
-                        Console.WriteLine($"Crc32 doesn't match: 0x{crc:X} and 0x{p.Crc32:X}");
-                    }
-                    return false;
-                }
-            }
+            CorruptedPacketCount++;
+            Console.WriteLine($"Crc32 doesn't match: 0x{crc:X} and 0x{p.Crc32:X}");
+            return false;
         }
-        inboundPackets.Enqueue(p);
+        inboundQueue.Enqueue(p);
         PacketCount++;
         return true;
     }
 
-    public bool TryDequeueInbound<T>(out T packet) where T : struct
+    public bool TryDequeueInbound<T>(out T outPacket) where T : struct
     {
-        int size = Marshal.SizeOf<T>();
-        if (size != SerialPacket.SizeInner)
-            throw new InvalidOperationException($"Inner packet size should be {SerialPacket.SizeInner} but is {size}");
+        SerialPacket.CheckInnerSize<T>();
 
-        if (!inboundPackets.TryDequeue(out SerialPacket serialPacket))
+        if (!inboundQueue.TryDequeue(out SerialPacket packet))
         {
-            packet = default;
+            outPacket = default;
             return false;
         }
-        unsafe
+        ref T inner = ref MemoryMarshal.AsRef<T>(packet.Inner);
+        outPacket = inner;
+        return true;
+    }
+
+    public bool TryDequeueInboundNative<T>(out SerialPacket<T> outPacket) where T : struct
+    {
+        SerialPacket.CheckInnerSize<T>();
+
+        if (!inboundQueue.TryDequeue(out SerialPacket packet))
         {
-            ref T inner = ref Unsafe.AsRef<T>(serialPacket.Inner);
-            packet = inner;
+            outPacket = default;
+            return false;
+        }
+        ref SerialPacket<T> typed = ref SerialPacket<T>.RefFromUntyped(ref packet);
+        outPacket = typed;
+        return true;
+    }
+
+    public bool TryDequeueInboundNative(out SerialPacket outPacket)
+    {
+        if (!inboundQueue.TryDequeue(out outPacket))
+        {
+            return false;
         }
         return true;
     }
 
-    public bool TryDequeueInboundNative<T>(out SerialPacket<T> packet) where T : struct
+    public void SendPacket<T>(uint type, in T inner) where T : struct
     {
-        int size = Marshal.SizeOf<T>();
-        if (size != SerialPacket.SizeInner)
-            throw new InvalidOperationException($"Inner packet size should be {SerialPacket.SizeInner} but is {size}");
+        SerialPacket.CheckInnerSize<T>();
+        if (!Connected)
+            throw new InvalidOperationException("Serial is not connected");
 
-        if (!inboundPackets.TryDequeue(out SerialPacket serialPacket))
-        {
-            packet = default;
-            return false;
-        }
-        unsafe
-        {
-            ref SerialPacket<T> inner = ref Unsafe.As<SerialPacket, SerialPacket<T>>(ref serialPacket);
-            packet = inner;
-        }
-        return true;
+        ref SerialPacket<T> packet = ref Unsafe.As<byte, SerialPacket<T>>(ref outboundBuffer[0]);
+        packet.Type = type;
+        packet.Inner = inner;
+        packet.Crc32 = packet.GetCrc32();
+        packet.Magic = SerialPacket.MagicExpected;
+        serial!.Write(outboundBuffer, 0, SerialPacket.Size);
     }
 
     ~SerialManager()

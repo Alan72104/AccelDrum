@@ -1,4 +1,5 @@
-﻿using OpenTK.Graphics.OpenGL4;
+﻿using AccelDrum.Game.Utils;
+using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using System;
 using System.Collections.Generic;
@@ -61,6 +62,10 @@ public class Shader : IDisposable
 
         Console.WriteLine($"Shader ({Path.GetFileName(VertPath)}, {Path.GetFileName(FragPath)}) compiled");
 
+        MatrixPrinter printer = new()
+        {
+            Separator = " "
+        };
         Console.WriteLine("Uniforms:");
         GL.GetProgram(Handle, GetProgramParameterName.ActiveUniforms, out var numberOfUniforms);
         var uniformLocs = new List<UniformLoc>();
@@ -69,23 +74,26 @@ public class Shader : IDisposable
             GL.GetActiveUniform(Handle, i, 100, out _, out int size, out ActiveUniformType type, out string name);
             var location = GL.GetUniformLocation(Handle, name);
             uniformLocs.Add(new(name, location));
-            Console.WriteLine($"{type} {name} {size}");
+            printer.Set(1, i, type);
+            printer.Set(2, i, name);
+            printer.Set(3, i, size);
         }
         uniformLocs.Sort();
         UniformLocations = uniformLocs.ToArray();
-        Console.WriteLine(string.Join(",", UniformLocations.Select(l => l.Name)));
+        Console.WriteLine(printer.ToString());
+        printer.Clear();
 
         Console.WriteLine("Attributes:");
         GL.GetProgram(Handle, GetProgramParameterName.ActiveAttributes, out var numberOfAttributes);
         for (int i = 0; i < numberOfAttributes; i++)
         {
             GL.GetActiveAttrib(Handle, i, 100, out _, out int size, out ActiveAttribType type, out string name);
-            Console.WriteLine($"{type} {name} {size}");
+            printer.Set(1, i, type);
+            printer.Set(2, i, name);
+            printer.Set(3, i, size);
         }
-
-        Console.WriteLine(GetAttribLocation("aColor"));
-        Console.WriteLine(GetAttribLocation("color"));
-        Console.WriteLine(GL.GetProgramInfoLog(Handle));
+        Console.WriteLine(printer.ToString());
+        Console.WriteLine();
     }
 
     private static string ReadAndPreProcess(string path)
