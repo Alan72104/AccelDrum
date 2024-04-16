@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include <string_view>
-#include "Serial/SerialManager.h"
-#include "Serial/SerialPackets.h"
+#include <Serial/SerialManager.h>
+#include <Serial/SerialPackets.h>
 
 namespace Utils
 {
@@ -14,8 +14,7 @@ namespace Utils
             TextPacket p{
                 .length = slice.length()};
             slice.copy(p.string.data(), slice.size());
-            // serial.send(PacketType::Text, &p, sizeof(p));
-            serial.send(PacketType::Text, p);
+            serial.send(PacketType::Text, &p, sizeof(p));
         }
     }
 }

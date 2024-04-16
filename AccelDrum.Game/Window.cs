@@ -10,43 +10,33 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO.Ports;
 using System.Linq;
-using System.Reflection.Emit;
-using System.Runtime.InteropServices;
-using System.Threading;
-using static OpenTK.Graphics.OpenGL.GL;
 using Vector3 = OpenTK.Mathematics.Vector3;
 
 namespace AccelDrum.Game;
 
 public class Window : GameWindow
 {
-    Vector3 _color = new Vector3(0.5f, 0.5f, 0.0f);
-
-    // This class is a wrapper around a shader, which helps us manage it.
-    // The shader class's code is in the Common project.
-    // What shaders are and what they're used for will be explained later in this tutorial.
-
-    // Controller for ImGUI 
-    private ImGuiController _controller = null!;
     private bool _disposed = false;
-
+    private ImGuiController _controller = null!;
+    private Vector3 _color = new Vector3(0.5f, 0.5f, 0.0f);
     private Camera _camera = null!;
-    private Vector2 _lastMousePos = new();
+    private Vector2 _lastMousePos;
     private float hue = 0.0f;
     private double lastFps = 0.0;
     private double lastFrametime = 0.0;
     private bool vsync = true;
-    private Shader shaderMain = null!;
-    private Shader shaderGround = null!;
-    private MeshManager meshManager = new();
     private Vector3 ambientColor = new(1);
     private float ambientStrength = 0.5f;
-    private Stopwatch stopwatch = Stopwatch.StartNew();
+    private Stopwatch gameTimer = Stopwatch.StartNew();
+    private bool demoWindow = false;
+    private AccelDevice accel = null!;
+    private SimpleFixedSizeHistoryQueue<float> frametimeHistory = new(500);
+
+    private MeshManager meshManager = new();
+    private Shader shaderMain = null!;
+    private Shader shaderGround = null!;
     private Uniform<Matrix4> uniformView = null!;
     private Uniform<Matrix4> uniformProjection = null!;
     private Uniform<Vector3> uniformAmbientColor = null!;
@@ -58,8 +48,6 @@ public class Window : GameWindow
     private Mesh meshDebug = null!;
     private Texture textureContainer = null!;
     private Texture textureCea7d = null!;
-    private bool demoWindow = false;
-    private AccelDevice accel = null!;
 
     public Window() : base(
         GameWindowSettings.Default,
@@ -204,6 +192,8 @@ public class Window : GameWindow
         lastFrametime = lastFrametime * (1 - weight) + this.UpdateTime * weight;
 
         accel.Update();
+
+        frametimeHistory.Push((float)this.UpdateTime * 1000);
     }
 
     private void UpdateGui(FrameEventArgs e)
@@ -278,6 +268,12 @@ public class Window : GameWindow
                 //meshCubes.Indexes.AddRange(i);
                 //meshCubes.Texture = textureCea7d4517decdf202278d1cdbab9a1f5c088401ed86df5110dc37976c19e3116;
             }
+            {
+                System.Numerics.Vector2 size = new(-1, 50);
+                ImGui.PlotLines("frametime", ref frametimeHistory.Ref, frametimeHistory.Length,
+                    0, null, 0, 1000.0f / 60,
+                    size, frametimeHistory.ElementSize);
+            }
             ImGui.End();
         }
     }
@@ -300,7 +296,7 @@ public class Window : GameWindow
         uniformProjection.Value = proj;
         uniformAmbientColor.Value = ambientColor;
         uniformAmbientStrength.Value = ambientStrength;
-        uniformTime.Value = (float)stopwatch.Elapsed.TotalSeconds;
+        uniformTime.Value = (float)gameTimer.Elapsed.TotalSeconds;
         meshGround.Draw();
         meshMain.Draw();
         meshCubes.Draw();
@@ -373,7 +369,6 @@ public class Window : GameWindow
             _controller.PressChar((char)e.Unicode);
         else
         {
-
         }
     }
 

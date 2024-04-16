@@ -83,6 +83,9 @@ public static class ColorUtils
         return new Vector3(h, s, l);
     }
 
+    /// <summary>
+    /// Converts <see cref="System.Numerics.Vector4"/> within range [0.0f, 255.0f] to ARGB value
+    /// </summary>
     public static uint VectorNetToArgb(System.Numerics.Vector4 v)
     {
         return ((uint)v.W & 0xFF) << 24 |
@@ -91,6 +94,9 @@ public static class ColorUtils
             ((uint)v.Z % 0xFF);
     }
 
+    /// <summary>
+    /// Converts <see cref="Color"/> to <see cref="Vector4"/> within range [0.0f, 1.0f]
+    /// </summary>
     public static Vector4 ColorToVector(Color v)
     {
         return new Vector4(

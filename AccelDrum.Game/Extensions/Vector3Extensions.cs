@@ -1,6 +1,5 @@
 ﻿using AccelDrum.Game.Graphics;
 using OpenTK.Mathematics;
-using System;
 using System.Runtime.CompilerServices;
 using Vector3Net = System.Numerics.Vector3;
 

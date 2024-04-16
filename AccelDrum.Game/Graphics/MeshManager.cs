@@ -30,7 +30,7 @@ public class MeshManager : IDisposable
         Shaders[name] = new Shader(vert, frag);
         return Shaders[name];
     }
-    
+
 
     public Texture CreateTexture(string name, string path)
     {

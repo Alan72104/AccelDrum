@@ -1,22 +1,22 @@
-﻿using AccelDrum.Game.Utils;
+﻿using AccelDrum.Game.Accel;
+using Serilog;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace AccelDrum.Game.Serial;
 
 public class SerialManager : IDisposable
 {
-    public bool Connected => serial is not null;
+    public bool Connected => serial.IsOpen;
     public string PortName => Connected ? serial!.PortName : "";
     public ulong Magic => SerialPacket.MagicExpected;
     public int PacketCount { get; private set; } = 0;
     public int CorruptedPacketCount { get; private set; } = 0;
     public int BytesRead => bytesRead;
-    private SerialPort? serial;
+    private SerialPort serial = new();
     private Queue<byte> parsingQueue = new();
     private ConcurrentQueue<SerialPacket> inboundQueue = new();
     private ulong lastLong = 0;
@@ -30,27 +30,20 @@ public class SerialManager : IDisposable
         {
             throw new NotSupportedException($"Packet size was modified {SerialPacket.SizeExpected} => {SerialPacket.Size}");
         }
+        serial.DataReceived += OnSerialDataReceived;
+        serial.ErrorReceived += OnSerialErrorReceived;
     }
 
     public void Update()
     {
-        if (Connected && !serial!.IsOpen)
-            Disconnect();
     }
 
     public void Connect(string name, int baud)
     {
         if (Connected)
             throw new InvalidOperationException("Serial is already connected");
-        serial = new SerialPort()
-        {
-            PortName = name,
-            BaudRate = baud,
-            ReadTimeout = 100,
-            WriteTimeout = 250,
-        };
-        serial.DataReceived += OnSerialDataReceived;
-        serial.ErrorReceived += OnSerialErrorReceived;
+        serial.PortName = name;
+        serial.BaudRate = baud;
         serial.Open();
     }
 
@@ -58,14 +51,18 @@ public class SerialManager : IDisposable
     {
         if (!Connected)
             throw new InvalidOperationException("Serial is already disconnected");
-        //serial!.DataReceived -= OnSerialDataReceived;
-        //serial!.ErrorReceived -= OnSerialErrorReceived;
-        serial!.Close();
-        serial = null;
+        serial.Close();
+        parsingQueue.Clear();
+        lastLong = 0;
         inboundQueue.Clear();
         PacketCount = 0;
         CorruptedPacketCount = 0;
         bytesRead = 0;
+    }
+
+    public string[] GetPortNames()
+    {
+        return SerialPort.GetPortNames();
     }
 
     private void OnSerialDataReceived(object sender, SerialDataReceivedEventArgs e)
@@ -73,20 +70,20 @@ public class SerialManager : IDisposable
         SerialPort serial = (SerialPort)sender;
         try
         {
-            while (serial.BytesToRead > 0)
+            while (serial.BytesToRead > 0 && serial.IsOpen)
             {
                 int @int = (byte)serial.ReadByte();
                 if (@int == -1)
                     return;
                 byte b = (byte)@int;
                 parsingQueue.Enqueue(b);
-                lastLong <<= 8; // Data is little endian, we reverse it later for readability
+                lastLong <<= 8; // Data is little endian, and gets reversed by <<
                 lastLong |= b;
                 bytesRead++;
                 if (parsingQueue.Count > SerialPacket.Size)
                     parsingQueue.Dequeue();
                 if (parsingQueue.Count == SerialPacket.Size &&
-                    BitUtils.ReverseBytewise(lastLong) == SerialPacket.MagicExpected)
+                    lastLong == SerialPacket.MagicExpectedReversed)
                 {
                     SerialPacket newPacket = new();
                     unsafe
@@ -107,7 +104,7 @@ public class SerialManager : IDisposable
         serial.DiscardInBuffer();
         parsingQueue.Clear();
         lastLong = 0;
-        Console.WriteLine($"Serial errored: {e.EventType}");
+        Log.Warning($"Serial errored: {e.EventType}");
     }
 
     private bool TryEnqueueInbound(ref SerialPacket p)
@@ -116,7 +113,7 @@ public class SerialManager : IDisposable
         if (crc != p.Crc32)
         {
             CorruptedPacketCount++;
-            Console.WriteLine($"Crc32 doesn't match: 0x{crc:X} and 0x{p.Crc32:X}");
+            Log.Warning($"Crc32 doesn't match: 0x{crc:X} and 0x{p.Crc32:X}");
             return false;
         }
         inboundQueue.Enqueue(p);
@@ -133,8 +130,8 @@ public class SerialManager : IDisposable
             outPacket = default;
             return false;
         }
-        ref T inner = ref MemoryMarshal.AsRef<T>(packet.Inner);
-        outPacket = inner;
+        ref SerialPacket<T> typed = ref SerialPacket<T>.RefFromUntyped(ref packet);
+        outPacket = typed.Inner;
         return true;
     }
 
@@ -161,18 +158,18 @@ public class SerialManager : IDisposable
         return true;
     }
 
-    public void SendPacket<T>(uint type, in T inner) where T : struct
+    public void SendPacket<T>(PacketType type, in T inner) where T : struct
     {
         SerialPacket.CheckInnerSize<T>();
         if (!Connected)
             throw new InvalidOperationException("Serial is not connected");
 
         ref SerialPacket<T> packet = ref Unsafe.As<byte, SerialPacket<T>>(ref outboundBuffer[0]);
-        packet.Type = type;
+        packet.Type = (uint)type;
         packet.Inner = inner;
         packet.Crc32 = packet.GetCrc32();
         packet.Magic = SerialPacket.MagicExpected;
-        serial!.Write(outboundBuffer, 0, SerialPacket.Size);
+        serial.Write(outboundBuffer, 0, SerialPacket.Size);
     }
 
     ~SerialManager()

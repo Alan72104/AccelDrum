@@ -1,14 +1,12 @@
 ﻿using AccelDrum.Game.Utils;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Xml.Linq;
-using static OpenTK.Graphics.OpenGL.GL;
 
 namespace AccelDrum.Game.Graphics.Shaders;
 
@@ -60,13 +58,13 @@ public class Shader : IDisposable
         GL.DeleteShader(fragmentShader);
         GL.DeleteShader(vertexShader);
 
-        Console.WriteLine($"Shader ({Path.GetFileName(VertPath)}, {Path.GetFileName(FragPath)}) compiled");
+        Log.Information($"Shader ({Path.GetFileName(VertPath)}, {Path.GetFileName(FragPath)}) compiled");
 
         MatrixPrinter printer = new()
         {
             Separator = " "
         };
-        Console.WriteLine("Uniforms:");
+        Log.Information("Uniforms:");
         GL.GetProgram(Handle, GetProgramParameterName.ActiveUniforms, out var numberOfUniforms);
         var uniformLocs = new List<UniformLoc>();
         for (var i = 0; i < numberOfUniforms; i++)
@@ -80,10 +78,10 @@ public class Shader : IDisposable
         }
         uniformLocs.Sort();
         UniformLocations = uniformLocs.ToArray();
-        Console.WriteLine(printer.ToString());
+        Log.Information(printer.ToString());
         printer.Clear();
 
-        Console.WriteLine("Attributes:");
+        Log.Information("Attributes:");
         GL.GetProgram(Handle, GetProgramParameterName.ActiveAttributes, out var numberOfAttributes);
         for (int i = 0; i < numberOfAttributes; i++)
         {
@@ -92,8 +90,8 @@ public class Shader : IDisposable
             printer.Set(2, i, name);
             printer.Set(3, i, size);
         }
-        Console.WriteLine(printer.ToString());
-        Console.WriteLine();
+        Log.Information(printer.ToString());
+        Log.Information("");
     }
 
     private static string ReadAndPreProcess(string path)

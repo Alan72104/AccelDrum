@@ -1,8 +1,8 @@
-﻿using System;
-using System.IO;
-using System.Security.Cryptography;
-using OpenTK.Graphics.OpenGL4;
+﻿using OpenTK.Graphics.OpenGL4;
+using Serilog;
 using StbImageSharp;
+using System;
+using System.IO;
 
 namespace AccelDrum.Game.Graphics.Textures;
 
@@ -19,7 +19,7 @@ public class Texture : IDisposable
         Handle = GL.GenTexture();
         StbImage.stbi_set_flip_vertically_on_load(1);
         ImageResult image = ImageResult.FromStream(File.OpenRead(path), ColorComponents.RedGreenBlueAlpha);
-        Console.WriteLine($"Loaded image {System.IO.Path.GetFileNameWithoutExtension(path)} size: {image.Width}x{image.Height}");
+        Log.Information($"Loaded image {System.IO.Path.GetFileNameWithoutExtension(path)} size: {image.Width}x{image.Height}");
         Bind();
         SetParameters();
         GL.TexImage2D(Target, 0, PixelInternalFormat.Rgba, image.Width, image.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, image.Data);

@@ -40,6 +40,9 @@ public:
     // Toggles the backlight
     bool toggleBacklight();
 
+    // Gets the backlight
+    bool getBacklight() const;
+
     // Returns true if col and row and final string length are within the range,
     // string is truncated if length is longer than cols
     bool printf(uint32_t col, uint32_t row, const char* s, ...);
@@ -53,7 +56,7 @@ public:
     // Returns true if col and row and final string length are within the range,
     // string is truncated if length is longer than cols
     // Display will be updated constantly before the timeout elapses
-    bool overlayPrintf(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char* s, ...);
+    bool overlayPrintf(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char *s, ...);
 
     // Returns true if col and row are within the range
     // Display will be updated constantly before the timeout elapses

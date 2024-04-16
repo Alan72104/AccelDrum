@@ -68,8 +68,6 @@ public class MatrixPrinter(int initialRows = 1, int initialColumns = 1)
         matrix[y, x] = content.ToString();
     }
 
-    public void Print() => Console.WriteLine(this.ToString());
-
     public void Clear()
     {
         matrix = new string?[initialRows, initialColumns];

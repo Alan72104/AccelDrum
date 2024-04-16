@@ -5,6 +5,7 @@ using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Common.Input;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using Serilog;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -15,6 +16,9 @@ namespace AccelDrum
 {
     public class ImGuiController : IDisposable
     {
+        public static ImFontPtr FontExo2 { get; private set; }
+        public static ImFontPtr FontSourceCodePro { get; private set; }
+
         private bool _frameBegun;
 
         private int _vertexArray;
@@ -65,10 +69,8 @@ namespace AccelDrum
             ImGui.SetCurrentContext(context);
             var io = ImGui.GetIO();
             //io.Fonts.AddFontDefault();
-            var font = ImGui.GetIO().Fonts.AddFontFromFileTTF("Resources/Exo2-Medium.otf", 20);
-            //ImGui.GetIO().Fonts.Build();
-            //ImGui.PushFont(font);
-            //_controller.RecreateFontDeviceTexture();
+            FontExo2 = ImGui.GetIO().Fonts.AddFontFromFileTTF("Resources/Exo2-Medium.otf", 20);
+            FontSourceCodePro = ImGui.GetIO().Fonts.AddFontFromFileTTF("Resources/SourceCodePro-Medium.ttf", 20);
 
             io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset | ImGuiBackendFlags.HasMouseCursors;
             // Enable Docking
@@ -395,7 +397,7 @@ void main()
                     GL.BufferData(BufferTarget.ArrayBuffer, newSize, IntPtr.Zero, BufferUsageHint.DynamicDraw);
                     _vertexBufferSize = newSize;
 
-                    Console.WriteLine($"Resized dear imgui vertex buffer to new size {_vertexBufferSize}");
+                    Log.Information($"Resized dear imgui vertex buffer to new size {_vertexBufferSize}");
                 }
 
                 int indexSize = cmd_list.IdxBuffer.Size * sizeof(ushort);
@@ -405,7 +407,7 @@ void main()
                     GL.BufferData(BufferTarget.ElementArrayBuffer, newSize, IntPtr.Zero, BufferUsageHint.DynamicDraw);
                     _indexBufferSize = newSize;
 
-                    Console.WriteLine($"Resized dear imgui index buffer to new size {_indexBufferSize}");
+                    Log.Information($"Resized dear imgui index buffer to new size {_indexBufferSize}");
                 }
             }
 

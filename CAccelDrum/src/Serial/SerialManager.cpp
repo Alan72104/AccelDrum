@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "SerialManager.h"
 #include "SerialPackets.h"
+#include "Display/Display.h"
 
 SerialManager serial;
 
@@ -30,6 +31,24 @@ void SerialManager::run()
     receive();
 }
 
+void SerialManager::send(PacketType type, void* packet, size_t size)
+{
+    if (size != sizeof(SerialPacket::Inner))
+        return;
+    SerialPacket::Inner &inner = *reinterpret_cast<SerialPacket::Inner *>(packet);
+    if (!(type > PacketType::None && type < PacketType::Count))
+        return;
+    SerialPacket outPacket{
+        .type = type,
+        .inner = inner,
+        .magic = SerialPacket::magicExpected};
+    crcOut.restart();
+    crcOut.add(reinterpret_cast<uint8_t *>(&outPacket.type), sizeof(outPacket.type));
+    crcOut.add(reinterpret_cast<uint8_t *>(&outPacket.inner), sizeof(outPacket.inner));
+    outPacket.crc32 = crcOut.calc();
+    sendNative(outPacket);
+}
+
 void SerialManager::sendNative(SerialPacket &packet)
 {
     Serial.write(reinterpret_cast<byte *>(&packet), sizeof(packet));
@@ -37,9 +56,9 @@ void SerialManager::sendNative(SerialPacket &packet)
 
 void SerialManager::receive()
 {
-    const int bytesPerCycle = 128;
+    const int maxBytesPerBatch = sizeof(SerialPacket) * 4;
     int bytesRead = 0;
-    while (Serial.available() && bytesRead < bytesPerCycle)
+    while (Serial.available() && bytesRead < maxBytesPerBatch)
     {
         bytesRead++;
         int _int = Serial.read();
@@ -68,6 +87,9 @@ bool SerialManager::tryEnqueueInbound(SerialPacket &packet)
     crcIn.add(reinterpret_cast<uint8_t *>(&packet.type), sizeof(packet.type));
     crcIn.add(reinterpret_cast<uint8_t *>(&packet.inner), sizeof(packet.inner));
     uint32_t crc = crcIn.calc();
+    display.overlayClear();
+    display.overlayPrintf(0, 1, 1000, "Inbound v %d, x %d",
+        serial.getPacketCount(), serial.getCorruptedPacketCount());
     if (crc != packet.crc32)
     {
         corruptedPacketCount++;
@@ -78,20 +100,12 @@ bool SerialManager::tryEnqueueInbound(SerialPacket &packet)
     return true;
 }
 
-template <typename T>
-    requires(sizeof(T) == sizeof(SerialPacket::inner))
-bool SerialManager::tryDequeueInbound(PacketType type, T &outPacket)
+bool SerialManager::tryDequeueInbound(SerialPacket &outPacket)
 {
     if (inboundQueue.size() > 0)
     {
-        SerialPacket inPacket = inboundQueue.first();
-        PacketType inType = inPacket.type;
-        if (inType > PacketType::None && inType < PacketType::Count &&
-            inType == type)
-        {
-            outPacket = inboundQueue.pop();
-            return true;
-        }
+        outPacket = inboundQueue.pop();
+        return true;
     }
     return false;
 }
