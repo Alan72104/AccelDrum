@@ -31,9 +31,10 @@ public struct AccelPacket
 public struct TextPacket
 {
     public uint Length;
+    public bool HasNext;
     public TextPacketStr Str;
 
-    [InlineArray(SerialPacket.SizeInner - sizeof(uint))]
+    [InlineArray(SerialPacket.SizeInner - sizeof(uint) - sizeof(bool))]
     public struct TextPacketStr { private byte element0; }
 }
 
@@ -50,18 +51,14 @@ public struct ConfigurePacket
     public enum Val
     {
         None = 0,
-        Get = -1000,
-        Result = -2000,
-        Ack = -100,
-        Set = 1,
-        BacklightGet = Get,
-        BacklightResultOn = Result,
-        BacklightResultOff = Result + 1,
-        BacklightAck = Ack,
-        BacklightSetOn = Set,
-        BacklightSetOff = Set + 1,
-        BacklightSetToggle = Set + 2,
-        ResetDmpAck = Ack,
+        BacklightGet,
+        BacklightResultOn,
+        BacklightResultOff,
+        BacklightAck,
+        BacklightSetOn,
+        BacklightSetOff,
+        BacklightSetToggle,
+        ResetDmpAck
     }
 
     public Typ Type;

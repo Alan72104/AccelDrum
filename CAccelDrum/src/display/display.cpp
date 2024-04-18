@@ -11,13 +11,12 @@
 
 Display display;
 
-Display::Display() :
-    lcd(0x27, 20, 4),
-    lcdOverlayTimeoutMillis(0),
-    lcdBufOverlay{},
-    lcdBufNew{},
-    lcdBufOld{},
-    backlight(false)
+Display::Display() : lcd(0x27, 20, 4),
+                     lcdOverlayTimeoutMillis(0),
+                     lcdBufOverlay{},
+                     lcdBufNew{},
+                     lcdBufOld{},
+                     backlight(false)
 {
     init();
 }

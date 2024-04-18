@@ -1,44 +1,63 @@
-﻿using System.Diagnostics;
+﻿using System;
+using System.Diagnostics;
+using Printer = System.Action<System.TimeSpan>;
 
 namespace AccelDrum.Game.Utils;
 
-public class Timer2
+public class Timer2 : Stopwatch, IDisposable
 {
     public long ThresholdMs { get; set; }
-    public bool Running => stopwatch.IsRunning;
-    private Stopwatch stopwatch;
+    private Printer? printer;
 
     public Timer2(long thresholdMs)
     {
-        stopwatch = new Stopwatch();
         ThresholdMs = thresholdMs;
+        Start();
+    }
+
+    public Timer2(long thresholdMs, Printer printer) : this(thresholdMs)
+    {
+        this.printer = printer;
+    }
+
+    public Timer2(Printer printer) : this(0, printer)
+    {
     }
 
     public bool CheckAndResetIfElapsed()
     {
-        if (!stopwatch.IsRunning)
+        if (!IsRunning)
         {
-            stopwatch.Restart();
+            Restart();
             return false;
         }
 
-        if (stopwatch.ElapsedMilliseconds >= ThresholdMs)
+        if (ElapsedMilliseconds >= ThresholdMs)
         {
-            stopwatch.Restart();
+            Restart();
             return true;
         }
         return false;
     }
 
-    public Timer2 Stop()
+    public new Timer2 Stop()
     {
-        stopwatch.Stop();
+        base.Stop();
         return this;
     }
 
-    public Timer2 Start()
+    public new Timer2 Start()
     {
-        stopwatch.Start();
+        base.Start();
         return this;
+    }
+
+    public void Dispose()
+    {
+        if (IsRunning)
+        {
+            printer?.Invoke(Elapsed);
+            Stop();
+        }
     }
 }

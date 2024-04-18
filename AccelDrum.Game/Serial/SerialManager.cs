@@ -1,4 +1,5 @@
 ﻿using AccelDrum.Game.Accel;
+using AccelDrum.Game.Utils;
 using Serilog;
 using System;
 using System.Collections.Concurrent;
@@ -169,7 +170,11 @@ public class SerialManager : IDisposable
         packet.Inner = inner;
         packet.Crc32 = packet.GetCrc32();
         packet.Magic = SerialPacket.MagicExpected;
-        serial.Write(outboundBuffer, 0, SerialPacket.Size);
+        using (_ = new Timer2(
+            time => Log.Information($"Packet of type {typeof(T).Name} sent in {time.TotalMicroseconds:n0} us")))
+        {
+            serial.Write(outboundBuffer, 0, SerialPacket.Size);
+        }
     }
 
     ~SerialManager()

@@ -23,7 +23,9 @@ public class AccelDevice : IDisposable
     private SimpleFixedSizeHistoryQueue<float> packetTimeHistory = new(250);
     private Stopwatch packetTimer = new();
     private SortedDictionary<PacketType, int> packetCounts = new();
-    private StringBuilder sbFromAccel = new();
+    private List<string> stringsFromAccel = new();
+    private string stringsFromAccelFull = "";
+    private List<byte> sbFromAccel = new();
     private bool showPacketTime = false;
     private bool packetTimePlotHovered = false;
     private bool showPacketBytes = false;
@@ -87,29 +89,45 @@ public class AccelDevice : IDisposable
                             velocity += p.Accel * secs;
                             meshTestCube.Position += p.Accel * secs * secs * 10;
                         }
-                        break;
                     }
+                    break;
                 case PacketType.Text:
                     {
                         TextPacket p = native.GetInnerAs<TextPacket>();
                         if (p.Length > 0)
                         {
                             ReadOnlySpan<byte> span = MemoryMarshal.CreateReadOnlySpan(ref p.Str[0], (int)p.Length);
-                            string str = Encoding.UTF8.GetString(span).Replace('\0', ' ');
-                            sbFromAccel.Append(str);
-                            while (sbFromAccel.Length > 128)
+                            if (p.HasNext)
                             {
-                                int i = sbFromAccel.ToString().IndexOf('\n');
-                                if (i == -1)
-                                    break;
-                                if (sbFromAccel.Length > 150)
-                                    sbFromAccel.Remove(0, sbFromAccel.Length - 150);
+                                sbFromAccel.AddRange(span);
+                            }
+                            else
+                            {
+                                if (sbFromAccel.Count > 0)
+                                {
+                                    sbFromAccel.AddRange(span);
+                                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
+                                    stringsFromAccel.Add(str);
+                                    sbFromAccel.Clear();
+                                }
                                 else
-                                    sbFromAccel.Remove(0, i + 1);
+                                {
+                                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
+                                    stringsFromAccel.Add(str);
+                                }
+                                if (stringsFromAccel.Count > 5)
+                                    stringsFromAccel.RemoveAt(0);
+                                stringsFromAccelFull = string.Join("", stringsFromAccel);
                             }
                         }
-                        break;
                     }
+                    break;
+                case PacketType.Configure:
+                    {
+                        ConfigurePacket p = native.GetInnerAs<ConfigurePacket>();
+                        Log.Information($"Received config packet: {p.Value}");
+                    }
+                    break;
                 default:
                     Log.Warning($"Unknown packet type {native.Type}");
                     break;
@@ -213,12 +231,14 @@ public class AccelDevice : IDisposable
 
 
             ImGui.AlignTextToFramePadding();
-            ImGui.Text("String from accel");
+            ImGui.Text("Strings from accel");
             ImGui.SameLine();
             if (ImGui.Button("Clear"))
-                sbFromAccel.Clear();
-            string strFromAccel = sbFromAccel.ToString();
-            ImGui.Text(strFromAccel);
+            {
+                stringsFromAccel.Clear();
+                stringsFromAccelFull = "";
+            }
+            ImGui.Text(stringsFromAccelFull);
 
             if (serial.Connected && dataArrived)
             {
@@ -238,6 +258,12 @@ public class AccelDevice : IDisposable
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.Backlight, ConfigurePacket.Val.BacklightSetOff));
+                }
+
+                if (ImGui.Button("Reset dmp"))
+                {
+                    serial.SendPacket(PacketType.Configure, new ConfigurePacket(
+                        ConfigurePacket.Typ.ResetDmp, ConfigurePacket.Val.None));
                 }
 
                 ImGui.Checkbox("Packet delay", ref showPacketTime);
@@ -327,27 +353,18 @@ public class AccelDevice : IDisposable
             ImGui.Checkbox("Show bytes", ref showPacketBytes);
             if (showPacketBytes)
             {
-                ImGui.PushFont(ImGuiController.FontSourceCodePro);
-                unsafe
+                if (ImGui.BeginTable("tablePacketBytes", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                 {
+                    ImGui.PushFont(ImGuiController.FontSourceCodePro);
                     SerialPacket p = SerialPacket.RefFromTyped(ref latestAccelPacketNative);
-                    StringBuilder sb = new();
-                    for (int i = 0; i < SerialPacket.Size; i += 16)
+                    foreach (string s in SerialPacket.GetBytesHex(ref p, 4))
                     {
-                        sb.Clear();
-                        for (int j = 0; j < 16; j++)
-                        {
-                            byte b = ((byte*)&p)[i + j];
-                            sb.Append(b.ToString("X2"));
-                            if (j % 4 == 3)
-                                sb.Append(' ');
-                        }
-                        ImGui.Text(sb.ToString());
-                        if (i / 16 % 2 == 0)
-                            ImGui.SameLine();
+                        ImGui.TableNextColumn();
+                        ImGui.Text(s);
                     }
+                    ImGui.EndTable();
+                    ImGui.PopFont();
                 }
-                ImGui.PopFont();
             }
 
             ImGui.End();

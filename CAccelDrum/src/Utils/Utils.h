@@ -18,13 +18,4 @@ namespace Utils
         delete[] buf;
         return str;
     }
-
-    void printToPackets(std::string_view str);
-
-    template <typename... Args>
-    void printfToPackets(const char *format, Args... args)
-    {
-        std::string s = stringSprintf(format, args...);
-        printToPackets(s);
-    }
 }

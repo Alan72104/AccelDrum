@@ -69,13 +69,13 @@ void SerialManager::receive()
         lastLong <<= 8;
         lastLong |= b;
         if (parsingQueue.size() > sizeof(SerialPacket))
-            parsingQueue.pop();
+            parsingQueue.shift(); // pop() pops from the END of the buffer, which is what we just added
         if (parsingQueue.size() == sizeof(SerialPacket) &&
             lastLong == SerialPacket::magicExpectedReversed)
         {
             SerialPacket packet;
             for (int i = 0; i < sizeof(SerialPacket); i++)
-                reinterpret_cast<byte *>(&packet)[i] = parsingQueue.pop();
+                reinterpret_cast<byte *>(&packet)[i] = parsingQueue.shift();
             tryEnqueueInbound(packet);
         }
     }
@@ -87,9 +87,6 @@ bool SerialManager::tryEnqueueInbound(SerialPacket &packet)
     crcIn.add(reinterpret_cast<uint8_t *>(&packet.type), sizeof(packet.type));
     crcIn.add(reinterpret_cast<uint8_t *>(&packet.inner), sizeof(packet.inner));
     uint32_t crc = crcIn.calc();
-    display.overlayClear();
-    display.overlayPrintf(0, 1, 1000, "Inbound v %d, x %d",
-        serial.getPacketCount(), serial.getCorruptedPacketCount());
     if (crc != packet.crc32)
     {
         corruptedPacketCount++;
@@ -104,7 +101,7 @@ bool SerialManager::tryDequeueInbound(SerialPacket &outPacket)
 {
     if (inboundQueue.size() > 0)
     {
-        outPacket = inboundQueue.pop();
+        outPacket = inboundQueue.shift();
         return true;
     }
     return false;

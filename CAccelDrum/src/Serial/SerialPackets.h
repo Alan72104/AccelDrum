@@ -50,8 +50,9 @@ struct AccelPacket
 
 struct TextPacket
 {
-    static constexpr size_t sizeStr = SerialPacket::sizeInner - sizeof(uint32_t);
+    static constexpr size_t sizeStr = SerialPacket::sizeInner - sizeof(uint32_t) - sizeof(bool);
     uint32_t length;
+    bool hasNext;
     std::array<char, sizeStr> string;
 } __attribute__((packed));
 
@@ -67,18 +68,14 @@ struct ConfigurePacket
     enum class Val : int32_t
     {
         None = 0,
-        Get = -1000,
-        Result = -2000,
-        Ack = -100,
-        Set = 1,
-        BacklightGet = Get,
-        BacklightResultOn = Result,
-        BacklightResultOff = Result + 1,
-        BacklightAck = Ack,
-        BacklightSetOn = Set,
-        BacklightSetOff = Set + 1,
-        BacklightSetToggle = Set + 2,
-        ResetDmpAck = Ack,
+        BacklightGet,
+        BacklightResultOn,
+        BacklightResultOff,
+        BacklightAck,
+        BacklightSetOn,
+        BacklightSetOff,
+        BacklightSetToggle,
+        ResetDmpAck
     };
     Type type;
     Val value;

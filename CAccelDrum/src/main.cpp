@@ -98,7 +98,7 @@ void setup() {
         // 1 = initial memory load failed
         // 2 = DMP configuration updates failed
         // (if it's going to break, usually the code will be 1)
-        Utils::printfToPackets("DMP Initialization failed (code %u)\n", devStatus);
+        PacketUtils::printfToPackets("DMP Initialization failed (code %u)\n", devStatus);
     }
 
     pinMode(LED_BUILTIN, OUTPUT);
@@ -170,7 +170,7 @@ void updateBtns()
         bool bl = display.toggleBacklight();
         display.overlayClear();
         display.overlayPrintf(0, 0, 1000, bl ? "Backlight on" : "Backlight off");
-        Utils::printToPackets(bl ? "Backlight on" : "Backlight off");
+        PacketUtils::printlnToPackets(bl ? "Backlight on" : "Backlight off");
     }
     if (btn2.pressed())
     {
@@ -197,13 +197,13 @@ void blinkLed()
     else
     {
         scheduler.schedule(blinkLed);
-        // scheduler.scheduleDelayed(blinkLed, 100);
         digitalWrite(LED_BUILTIN, blinkState = true);
     }
 }
 
 void receivePackets()
 {
+    scheduler.schedule(receivePackets);
     SerialPacket packet;
     if (serial.tryDequeueInbound(packet))
     {
@@ -230,22 +230,30 @@ void receivePackets()
                                 break;
                             case ConfigurePacket::Val::BacklightSetOff:
                                 display.setBacklight(false);
-                                PacketUtils::sendConfigureAck(ConfigurePacket::Type::Backlight);
+                                PacketUtils::sendConfigureAck(
+                                    ConfigurePacket::Type::Backlight,
+                                    ConfigurePacket::Val::BacklightAck);
                                 break;
                             case ConfigurePacket::Val::BacklightSetOn:
                                 display.setBacklight(true);
-                                PacketUtils::sendConfigureAck(ConfigurePacket::Type::Backlight);
+                                PacketUtils::sendConfigureAck(
+                                    ConfigurePacket::Type::Backlight,
+                                    ConfigurePacket::Val::BacklightAck);
                                 break;
                             case ConfigurePacket::Val::BacklightSetToggle:
                                 display.toggleBacklight();
-                                PacketUtils::sendConfigureAck(ConfigurePacket::Type::Backlight);
+                                PacketUtils::sendConfigureAck(
+                                    ConfigurePacket::Type::Backlight,
+                                    ConfigurePacket::Val::BacklightAck);
                                 break;
                         }
                         break;
                     case ConfigurePacket::Type::ResetDmp:
                         mpu.resetDMP();
                         mpu.resetFIFO();
-                        PacketUtils::sendConfigureAck(ConfigurePacket::Type::ResetDmp);
+                        PacketUtils::sendConfigureAck(
+                            ConfigurePacket::Type::ResetDmp,
+                            ConfigurePacket::Val::ResetDmpAck);
                         break;
                 }
                 break;

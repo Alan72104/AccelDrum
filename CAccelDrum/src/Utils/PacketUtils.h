@@ -1,7 +1,10 @@
 #pragma once
 #include <concepts>
+#include <sstream>
+#include <iomanip>
 #include "Serial/SerialManager.h"
 #include "Serial/SerialPackets.h"
+#include "Utils/Utils.h"    
 
 namespace PacketUtils
 {
@@ -33,12 +36,32 @@ namespace PacketUtils
         serial.send(type, &packet, sizeof(T));
     }
 
-    inline void sendConfigureAck(ConfigurePacket::Type type)
+    std::string getBytesHex(SerialPacket& packet, uint32_t groupSize = 8, uint32_t groupsPerLine = 4);
+
+    inline void sendConfigureAck(ConfigurePacket::Type type, ConfigurePacket::Val ack)
     {
         PacketUtils::send(PacketType::Configure, ConfigurePacket
         {
             type,
-            ConfigurePacket::Val::Ack
+            ack
         });
+    }
+
+    void printToPackets(std::string_view str);
+
+    void printlnToPackets(std::string_view str);
+
+    template <typename... Args>
+    void printfToPackets(const char *format, Args... args)
+    {
+        std::string s = Utils::stringSprintf(format, args...);
+        printToPackets(s);
+    }
+
+    template <typename... Args>
+    void printlnfToPackets(const char *format, Args... args)
+    {
+        std::string s = Utils::stringSprintf(format, args...);
+        printlnToPackets(s);
     }
 }

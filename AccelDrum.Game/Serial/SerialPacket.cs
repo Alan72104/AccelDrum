@@ -1,7 +1,11 @@
-﻿using System;
+﻿using Serilog;
+using System;
 using System.Buffers.Binary;
+using System.Collections;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace AccelDrum.Game.Serial;
 
@@ -18,6 +22,12 @@ public struct SerialPacket
     public InnerData Inner;
     public uint Crc32;
     public ulong Magic;
+
+    [InlineArray(SerialPacket.SizeInner)]
+    public struct InnerData
+    {
+        private byte element0;
+    }
 
     /// <summary>
     /// Gets a copy of the inner data as type <typeparamref name="T"/>
@@ -59,13 +69,30 @@ public struct SerialPacket
         if (size != SerialPacket.SizeInner)
             throw new InvalidOperationException($"Inner packet size should be {SerialPacket.SizeInner} but is {size}, type: {typeof(T)}");
     }
+
+    /// <summary>
+    /// Gets the array bytes in hex grouped to <paramref name="groupSize"/> of a packet
+    /// </summary>
+    public static string[] GetBytesHex(ref SerialPacket packet, int groupSize)
+    {
+        ReadOnlySpan<byte> span = MemoryMarshal.AsBytes(new ReadOnlySpan<SerialPacket>(ref packet));
+        int i = 0;
+        StringBuilder sb = new();
+        string[] a = new string[SerialPacket.Size / groupSize];
+        foreach (byte b in span)
+        {
+            sb.Append(b.ToString("X2"));
+            i++;
+            if (i % groupSize == 0)
+            {
+                a[i / groupSize - 1] = sb.ToString();
+                sb.Clear();
+            }
+        }
+        return a;
+    }
 }
 
-[InlineArray(SerialPacket.SizeInner)]
-public struct InnerData
-{
-    private byte element0;
-}
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct SerialPacket<T> where T : struct
