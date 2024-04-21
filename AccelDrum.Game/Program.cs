@@ -15,7 +15,14 @@ class Program
                 rollingInterval: RollingInterval.Day,
                 rollOnFileSizeLimit: true)
             .CreateLogger();
-        using Window game = new Window();
-        game.Run();
+        try
+        {
+            using Window game = new Window();
+            game.Run();
+        }
+        catch (Exception ex)
+        {
+            Log.Fatal(ex, "Unhandled exception");
+        }
     }
 }

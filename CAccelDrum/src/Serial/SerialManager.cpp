@@ -18,7 +18,7 @@ SerialManager::SerialManager() : parsingQueue(),
 
 void SerialManager::init()
 {
-    Serial.begin(1000000);
+    Serial.begin(1'000'000);
     while (!Serial)
         ;
     while (Serial.available() && Serial.read())
@@ -107,12 +107,12 @@ bool SerialManager::tryDequeueInbound(SerialPacket &outPacket)
     return false;
 }
 
-int SerialManager::getCorruptedPacketCount() const
+uint32_t SerialManager::getCorruptedPacketCount() const
 {
     return corruptedPacketCount;
 }
 
-int SerialManager::getPacketCount() const
+uint32_t SerialManager::getPacketCount() const
 {
     return packetCount;
 }

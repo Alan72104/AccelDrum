@@ -73,8 +73,9 @@ bool Display::bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, 
 {
     if (row >= rows || col >= cols)
         return false;
-    uint32_t fullLen = std::vsnprintf(buf[row] + col, cols + 1 - col, s, args);
-    return fullLen >= 0 && fullLen < cols + 1 - col;
+    uint32_t bufSizeAvail = cols + 1 - col;
+    uint32_t fullLen = std::vsnprintf(buf[row] + col, bufSizeAvail, s, args);
+    return fullLen >= 0 && fullLen < bufSizeAvail;
 }
 
 bool Display::printf(uint32_t col, uint32_t row, const char* s, ...)
@@ -112,7 +113,7 @@ bool Display::print(uint32_t col, uint32_t row, const char c)
 bool Display::overlayPrint(uint32_t col, uint32_t row, uint64_t timeoutPeriodMs, const char c)
 {
     lcdOverlayTimeoutMillis = millis() + timeoutPeriodMs;
-    return bufPrint(lcdBufNew, col, row, c);
+    return bufPrint(lcdBufOverlay, col, row, c);
 }
 
 bool Display::checkBufIntegrity()

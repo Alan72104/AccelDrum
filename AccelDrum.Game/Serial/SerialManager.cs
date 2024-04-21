@@ -170,8 +170,9 @@ public class SerialManager : IDisposable
         packet.Inner = inner;
         packet.Crc32 = packet.GetCrc32();
         packet.Magic = SerialPacket.MagicExpected;
-        using (_ = new Timer2(
-            time => Log.Information($"Packet of type {typeof(T).Name} sent in {time.TotalMicroseconds:n0} us")))
+        using (new Timer2(
+            time => Log.Information($"Packet of type {typeof(T).Name} sent in {time.TotalMicroseconds:n0} us " +
+                $"(eff. {SerialPacket.Size * 8 / time.TotalSeconds:n0} bit/s)")))
         {
             serial.Write(outboundBuffer, 0, SerialPacket.Size);
         }

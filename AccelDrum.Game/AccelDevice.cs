@@ -18,7 +18,7 @@ public class AccelDevice : IDisposable
     private string[] portNames = [];
     private SerialManager serial = new();
     private bool dataArrived = false;
-    private SerialPacket<AccelPacket> latestAccelPacketNative;
+    private SerialPacket<RawAccelPacket> latestAccelPacketNative;
     private SimpleFixedSizeHistoryQueue<Vector3> rotHistory = new(250);
     private SimpleFixedSizeHistoryQueue<float> packetTimeHistory = new(250);
     private Stopwatch packetTimer = new();
@@ -26,9 +26,11 @@ public class AccelDevice : IDisposable
     private List<string> stringsFromAccel = new();
     private string stringsFromAccelFull = "";
     private List<byte> sbFromAccel = new();
-    private bool showPacketTime = false;
+    private bool showPacketTime = true;
     private bool packetTimePlotHovered = false;
     private bool showPacketBytes = false;
+    private bool showLatestAccelPacket = false;
+    private bool showRotHistory = false;
 
     private Mesh meshTestCube = null!;
     private MeshManager meshManager = null!;
@@ -80,8 +82,6 @@ public class AccelDevice : IDisposable
                             Gyro = ConvertAxes(p.Gyro),
                             GyroEuler = ConvertAxes(p.GyroEuler),
                         };
-                        latestAccelPacketNative = SerialPacket<AccelPacket>.RefFromUntyped(ref native);
-                        dataArrived = true;
                         if (p.DeltaMicros <= 1_000_000)
                         {
                             meshTestCube.RotationQuat = p.Gyro;
@@ -89,8 +89,30 @@ public class AccelDevice : IDisposable
                             velocity += p.Accel * secs;
                             meshTestCube.Position += p.Accel * secs * secs * 10;
                         }
+                        break;
                     }
-                    break;
+                case PacketType.RawAccel:
+                    {
+                        RawAccelPacket p = native.GetInnerAs<RawAccelPacket>();
+                        foreach (RawAccelPacket.Pack packNat in p.Packs)
+                        {
+                            var pack = packNat with
+                            {
+                                Accel = ConvertAxes(packNat.Accel),
+                                Gyro = ConvertAxes(packNat.Gyro),
+                            };
+                            latestAccelPacketNative = SerialPacket<RawAccelPacket>.RefFromUntyped(ref native);
+                            dataArrived = true;
+                            if (pack.DeltaMicros <= 1_000_000)
+                            {
+                                meshTestCube.Rotation = pack.Gyro;
+                                float secs = pack.DeltaMicros / 1_000_000.0f;
+                                velocity += pack.Accel * secs;
+                                //meshTestCube.Position += pack.Accel * secs * secs * 10;
+                            }
+                        }
+                        break;
+                    }
                 case PacketType.Text:
                     {
                         TextPacket p = native.GetInnerAs<TextPacket>();
@@ -120,14 +142,14 @@ public class AccelDevice : IDisposable
                                 stringsFromAccelFull = string.Join("", stringsFromAccel);
                             }
                         }
+                        break;
                     }
-                    break;
                 case PacketType.Configure:
                     {
                         ConfigurePacket p = native.GetInnerAs<ConfigurePacket>();
                         Log.Information($"Received config packet: {p.Value}");
+                        break;
                     }
-                    break;
                 default:
                     Log.Warning($"Unknown packet type {native.Type}");
                     break;
@@ -140,31 +162,55 @@ public class AccelDevice : IDisposable
         meshTestCube.Draw();
     }
 
+    private void Connect(string name)
+    {
+        using (_ = new Timer2(
+            time => Log.Information($"Connection took {time.TotalMicroseconds:n0} us")))
+        {
+            serial.Connect(name, 1_000_000);
+        }
+        packetTimeHistory.Clear();
+        packetTimer.Restart();
+    }
+
+    private void Disconnect()
+    {
+        using (_ = new Timer2(
+            time => Log.Information($"Disconnection took {time.TotalMicroseconds:n0} us")))
+        {
+            serial.Disconnect();
+        }
+    }
+
     public void SerialWindow()
     {
         if (ImGui.Begin("Serial"))
         {
             if (ImGui.Button("Get port names"))
                 portNames = serial.GetPortNames();
-            foreach (string name in portNames)
+            ImGui.SameLine();
+            if (ImGui.BeginTable("tablePorts", 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             {
-                ImGui.AlignTextToFramePadding();
-                ImGui.Text(name);
-                ImGui.SameLine();
+                foreach (string name in portNames)
+                {
+                    ImGui.TableNextColumn();
+                    ImGui.AlignTextToFramePadding();
+                    ImGui.Text(name);
+                    ImGui.SameLine();
 
-                if (serial.Connected && serial.PortName == name)
-                {
-                    if (ImGui.Button("Close"))
-                        serial.Disconnect();
+                    if (serial.Connected && serial.PortName == name)
+                    {
+                        if (ImGui.Button("Close"))
+                            Disconnect();
+                    }
+                    else if (ImGui.Button("Connect"))
+                    {
+                        if (serial.Connected)
+                            Disconnect();
+                        Connect(name);
+                    }
                 }
-                else if (ImGui.Button("Connect"))
-                {
-                    if (serial.Connected)
-                        serial.Disconnect();
-                    serial.Connect(name, 1000000);
-                    packetTimeHistory.Clear();
-                    packetTimer.Restart();
-                }
+                ImGui.EndTable();
             }
 
             ImGui.AlignTextToFramePadding();
@@ -259,7 +305,7 @@ public class AccelDevice : IDisposable
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.Backlight, ConfigurePacket.Val.BacklightSetOff));
                 }
-
+                ImGui.SameLine();
                 if (ImGui.Button("Reset dmp"))
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
@@ -273,98 +319,107 @@ public class AccelDevice : IDisposable
                         new(-1, 50), packetTimeHistory.ElementSize);
                     packetTimePlotHovered = ImGui.IsItemHovered();
                 }
-                AccelPacket accel = latestAccelPacketNative.Inner;
-                ImGui.Text("Latest packet");
-                if (ImGui.BeginTable("tableAccelData", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+
+                ImGui.Checkbox("Show bytes", ref showPacketBytes);
+                if (showPacketBytes)
                 {
-                    ImGui.TableSetupColumn("name", ImGuiTableColumnFlags.WidthFixed);
-                    ImGui.TableSetupColumn("value");
-
-                    ImGui.TableNextColumn();
-                    ImGui.SetNextItemWidth(4);
-                    ImGui.Text("Delta us");
-                    ImGui.TableNextColumn();
-                    ImGui.Text(accel.DeltaMicros.ToString());
-
-                    ImGui.TableNextColumn();
-                    ImGui.Text("m/s^2");
-                    ImGui.TableNextColumn();
-                    if (ImGui.BeginTable("tableAccelDataAccel", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                    if (ImGui.BeginTable("tablePacketBytes", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                     {
-                        for (int i = 0; i < 3; i++)
+                        ImGui.PushFont(ImGuiController.FontSourceCodePro);
+                        SerialPacket p = SerialPacket.RefFromTyped(ref latestAccelPacketNative);
+                        foreach (string s in SerialPacket.GetBytesHex(ref p, 4))
                         {
                             ImGui.TableNextColumn();
-                            ImGui.Text(accel.Accel[i].ToString("n2"));
+                            ImGui.Text(s);
                         }
                         ImGui.EndTable();
+                        ImGui.PopFont();
                     }
+                }
 
-                    ImGui.TableNextColumn();
-                    ImGui.Text("quat");
-                    ImGui.TableNextColumn();
-                    if (ImGui.BeginTable("tableAccelDataQuat", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                ImGui.Checkbox("Show latest accel packet", ref showLatestAccelPacket);
+                if (showLatestAccelPacket)
+                {
+                    RawAccelPacket.Pack accel = latestAccelPacketNative.Inner.Packs[0];
+                    if (ImGui.BeginTable("tableAccelData", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                     {
-                        Quaternion quat = accel.Gyro;
-                        for (int i = 0; i < 3; i++)
-                        {
-                            ImGui.TableNextColumn();
-                            ImGui.Text(quat.Xyz[i].ToString("n2"));
-                        }
+                        ImGui.TableSetupColumn("name", ImGuiTableColumnFlags.WidthFixed);
+                        ImGui.TableSetupColumn("value");
+
                         ImGui.TableNextColumn();
-                        ImGui.Text(quat.W.ToString("n2"));
-                        ImGui.EndTable();
-                    }
+                        ImGui.SetNextItemWidth(4);
+                        ImGui.Text("Delta us");
+                        ImGui.TableNextColumn();
+                        ImGui.Text(accel.DeltaMicros.ToString());
 
-                    ImGui.TableNextColumn();
-                    ImGui.Text("euler");
-                    ImGui.TableNextColumn();
-                    if (ImGui.BeginTable("tableAccelDataGyro", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-                    {
-                        Vector3 euler = accel.GyroEuler / MathF.PI * 180;
-                        for (int i = 0; i < 3; i++)
+                        ImGui.TableNextColumn();
+                        ImGui.Text("m/s^2");
+                        ImGui.TableNextColumn();
+                        if (ImGui.BeginTable("tableAccelDataAccel", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
                         {
-                            ImGui.TableNextColumn();
-                            ImGui.Text(euler[i].ToString("n2"));
+                            for (int i = 0; i < 3; i++)
+                            {
+                                ImGui.TableNextColumn();
+                                ImGui.Text(accel.Accel[i].ToString("n2"));
+                            }
+                            ImGui.EndTable();
                         }
+
+                        //ImGui.TableNextColumn();
+                        //ImGui.Text("quat");
+                        //ImGui.TableNextColumn();
+                        //if (ImGui.BeginTable("tableAccelDataQuat", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                        //{
+                        //    Quaternion quat = accel.Gyro;
+                        //    for (int i = 0; i < 3; i++)
+                        //    {
+                        //        ImGui.TableNextColumn();
+                        //        ImGui.Text(quat.Xyz[i].ToString("n2"));
+                        //    }
+                        //    ImGui.TableNextColumn();
+                        //    ImGui.Text(quat.W.ToString("n2"));
+                        //    ImGui.EndTable();
+                        //}
+
+                        ImGui.TableNextColumn();
+                        ImGui.Text("euler");
+                        ImGui.TableNextColumn();
+                        if (ImGui.BeginTable("tableAccelDataGyro", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                        {
+                            //Vector3 euler = accel.GyroEuler / MathF.PI * 180;
+                            Vector3 euler = accel.Gyro;
+                            for (int i = 0; i < 3; i++)
+                            {
+                                ImGui.TableNextColumn();
+                                ImGui.Text(euler[i].ToString("n2"));
+                            }
+                            ImGui.EndTable();
+                        }
+
+                        ImGui.TableNextColumn();
+                        ImGui.Text("Crc32");
+                        ImGui.TableNextColumn();
+                        ImGui.Text($"0x{latestAccelPacketNative.Crc32:X}");
+
+                        ImGui.TableNextColumn();
+                        ImGui.Text("Magic");
+                        ImGui.TableNextColumn();
+                        ImGui.Text($"0x{latestAccelPacketNative.Magic:X}");
                         ImGui.EndTable();
                     }
-
-                    ImGui.TableNextColumn();
-                    ImGui.Text("Crc32");
-                    ImGui.TableNextColumn();
-                    ImGui.Text($"0x{latestAccelPacketNative.Crc32:X}");
-
-                    ImGui.TableNextColumn();
-                    ImGui.Text("Magic");
-                    ImGui.TableNextColumn();
-                    ImGui.Text($"0x{latestAccelPacketNative.Magic:X}");
-                    ImGui.EndTable();
                 }
             }
 
-            System.Numerics.Vector2 size = new(-1, 50);
-            ImGui.PlotLines("x", ref rotHistory.Ref.X, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
-            ImGui.PlotLines("y", ref rotHistory.Ref.Y, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
-            ImGui.PlotLines("z", ref rotHistory.Ref.Z, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
-
-            ImGui.Checkbox("Show bytes", ref showPacketBytes);
-            if (showPacketBytes)
+            ImGui.Checkbox("Show rot history", ref showRotHistory);
+            if (showRotHistory)
             {
-                if (ImGui.BeginTable("tablePacketBytes", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-                {
-                    ImGui.PushFont(ImGuiController.FontSourceCodePro);
-                    SerialPacket p = SerialPacket.RefFromTyped(ref latestAccelPacketNative);
-                    foreach (string s in SerialPacket.GetBytesHex(ref p, 4))
-                    {
-                        ImGui.TableNextColumn();
-                        ImGui.Text(s);
-                    }
-                    ImGui.EndTable();
-                    ImGui.PopFont();
-                }
+                System.Numerics.Vector2 size = new(-1, 50);
+                ImGui.PlotLines("x", ref rotHistory.Ref.X, rotHistory.Length, 0, null, -180, 180,
+                    size, rotHistory.ElementSize);
+                ImGui.PlotLines("y", ref rotHistory.Ref.Y, rotHistory.Length, 0, null, -180, 180,
+                    size, rotHistory.ElementSize);
+                ImGui.PlotLines("z", ref rotHistory.Ref.Z, rotHistory.Length, 0, null, -180, 180,
+                    size, rotHistory.ElementSize);
             }
 
             ImGui.End();
@@ -400,6 +455,8 @@ public class AccelDevice : IDisposable
 
     public void Dispose()
     {
+        if (serial.Connected)
+            Disconnect();
         serial.Dispose();
     }
 }

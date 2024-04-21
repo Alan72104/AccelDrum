@@ -1,8 +1,9 @@
 #include <Arduino.h>
 #include <cstring>
 #include <cstdio>
+#include <limits>
 #include <I2Cdev.h>
-#include <MPU6050_6Axis_MotionApps20.h>
+#include <MPU6050.h>
 #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
     #include "Wire.h"
 #endif
@@ -60,7 +61,6 @@ void setup() {
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
         Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
-        // Wire.setClock(200000); // 400kHz I2C clock. Comment this line if having compilation difficulties
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
         Fastwire::setup(400, true);
     #endif
@@ -70,27 +70,21 @@ void setup() {
     serial.init();
 
     mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
-    pinMode(interruptPin, INPUT);
+    // pinMode(interruptPin, INPUT);
 
-    devStatus = mpu.dmpInitialize();
-
-    mpu.setXGyroOffset(220);
-    mpu.setYGyroOffset(76);
-    mpu.setZGyroOffset(-85);
-    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+    // mpu.setXGyroOffset(220);
+    // mpu.setYGyroOffset(76);
+    // mpu.setZGyroOffset(-85);
+    // mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
 
     if (devStatus == 0)
     {
         mpu.CalibrateAccel(6);
         mpu.CalibrateGyro(6);
-        // mpu.PrintActiveOffsets();
-        mpu.setDMPEnabled(true);
-        mpu.setFIFOTimeout(100);
 
-        attachInterrupt(digitalPinToInterrupt(interruptPin), dmpDataReady, RISING);
-        mpuIntStatus = mpu.getIntStatus();
-        dmpReady = true;
-        packetSize = mpu.dmpGetFIFOPacketSize();
+        // attachInterrupt(digitalPinToInterrupt(interruptPin), dmpDataReady, RISING);
+        // mpuIntStatus = mpu.getIntStatus();
+        // dmpReady = true;
     }
     else
     {
@@ -112,50 +106,78 @@ void setup() {
 }
 
 uint64_t lastSendMicros = 0;
+std::array<RawAccelPacket::Pack, RawAccelPacket::packCount> batchingBuffer;
+uint32_t batchingBufferIndex = 0;
+uint32_t batchesSent = 0;
 
 void processDmpPacket()
 {
-    scheduler.schedule(processDmpPacket);
-    if (!mpuInterrupt)
-        return;
-    if (!mpu.dmpGetCurrentFIFOPacket(fifoBuffer))
-        return;
+    scheduler.scheduleDelayed(processDmpPacket, 10);
     mpuInterrupt = false;
     display.print(display.cols - 1, 0, '\0');
 
-    mpu.dmpGetQuaternion(&q, fifoBuffer);
-    mpu.dmpGetAccel(&aa, fifoBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-    mpu.dmpGetEuler(euler, &q);
-    memcpy(&aaWorld, &aaReal, sizeof(VectorInt16)); // World accel
-    aaWorld.rotate(&q);
+    int16_t ax, ay, az;
+    int16_t gx, gy, gz;
+
+    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+
+    // mpu.dmpGetQuaternion(&q, fifoBuffer);
+    // mpu.dmpGetAccel(&aa, fifoBuffer);
+    // mpu.dmpGetGravity(&gravity, &q);
+    // mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
+    // mpu.dmpGetEuler(euler, &q);
+    // memcpy(&aaWorld, &aaReal, sizeof(VectorInt16)); // World accel
+    // aaWorld.rotate(&q);
     uint64_t micro = micros();
-    AccelPacket packet =
+    float ares = mpu.get_acce_resolution();
+    float gres = mpu.get_gyro_resolution();
+    RawAccelPacket::Pack pack =
     {
-        .deltaMicros = micro - lastSendMicros,
-        .ax = aaWorld.x * mpu.get_acce_resolution(),
-        .ay = aaWorld.y * mpu.get_acce_resolution(),
-        .az = aaWorld.z * mpu.get_acce_resolution(),
-        .gx = q.x * mpu.get_gyro_resolution(),
-        .gy = q.y * mpu.get_gyro_resolution(),
-        .gz = q.z * mpu.get_gyro_resolution(),
-        .gw = q.w * mpu.get_gyro_resolution(),
-        .ex = euler[0],
-        .ey = euler[1],
-        .ez = euler[2],
+        .deltaMicros = (uint32_t)min(micro - lastSendMicros, (uint64_t)std::numeric_limits<uint32_t>::max()),
+        .ax = ax * ares,
+        .ay = ay * ares,
+        .az = az * ares,
+        .gx = gx * gres,
+        .gy = gy * gres,
+        .gz = gz * gres,
     };
+    batchingBuffer[batchingBufferIndex++] = pack;
+    if (batchingBufferIndex >= RawAccelPacket::packCount)
+    {
+        batchingBufferIndex = 0;
+        RawAccelPacket packet =
+        {
+            .packs = batchingBuffer
+        };
+        PacketUtils::send(PacketType::RawAccel, packet);
+        batchesSent++;
+    }
+    // AccelPacket packet =
+    // {
+    //     .deltaMicros = micro - lastSendMicros,
+    //     .ax = aaWorld.x * mpu.get_acce_resolution(),
+    //     .ay = aaWorld.y * mpu.get_acce_resolution(),
+    //     .az = aaWorld.z * mpu.get_acce_resolution(),
+    //     .gx = q.x * mpu.get_gyro_resolution(),
+    //     .gy = q.y * mpu.get_gyro_resolution(),
+    //     .gz = q.z * mpu.get_gyro_resolution(),
+    //     .gw = q.w * mpu.get_gyro_resolution(),
+    //     .ex = euler[0],
+    //     .ey = euler[1],
+    //     .ez = euler[2],
+    // };
     lastSendMicros = micro;
-    PacketUtils::send(PacketType::Accel, packet);
+    // PacketUtils::send(PacketType::Accel, packet);
     display.clear();
-    display.printf(0, 0, "% 5.0f% 5.0f% 5.0f",
-        aaWorld.x * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
-        aaWorld.y * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
-        aaWorld.z * mpu.get_acce_resolution() * mpu.get_acce_resolution());
-    display.printf(0, 1, "% 5.0f% 5.0f% 5.0f",
-        euler[0] / PI * 180,
-        euler[1] / PI * 180,
-        euler[2] / PI * 180);
+    display.printf(0, 1, "%u", batchesSent);
+    // display.printf(0, 0, "% 5.0f% 5.0f% 5.0f",
+    //     aaWorld.x * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
+    //     aaWorld.y * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
+    //     aaWorld.z * mpu.get_acce_resolution() * mpu.get_acce_resolution());
+    // display.printf(0, 1, "% 5.0f% 5.0f% 5.0f",
+    //     euler[0] / PI * 180,
+    //     euler[1] / PI * 180,
+    //     euler[2] / PI * 180);
     return;
 }
 
@@ -201,6 +223,52 @@ void blinkLed()
     }
 }
 
+static void handleConfigurePacket(ConfigurePacket& packet)
+{
+    switch (packet.type)
+    {
+        case ConfigurePacket::Type::Backlight:
+            switch (packet.value)
+            {
+                case ConfigurePacket::Val::BacklightGet:
+                    PacketUtils::send(PacketType::Configure, ConfigurePacket{
+                        ConfigurePacket::Type::Backlight,
+                        display.getBacklight()
+                            ? ConfigurePacket::Val::BacklightResultOn
+                            : ConfigurePacket::Val::BacklightResultOff});
+                    break;
+                case ConfigurePacket::Val::BacklightSetOff:
+                    display.setBacklight(false);
+                    PacketUtils::sendConfigureAck(
+                        ConfigurePacket::Type::Backlight,
+                        ConfigurePacket::Val::BacklightAck);
+                    break;
+                case ConfigurePacket::Val::BacklightSetOn:
+                    display.setBacklight(true);
+                    PacketUtils::sendConfigureAck(
+                        ConfigurePacket::Type::Backlight,
+                        ConfigurePacket::Val::BacklightAck);
+                    break;
+                case ConfigurePacket::Val::BacklightSetToggle:
+                    display.toggleBacklight();
+                    PacketUtils::sendConfigureAck(
+                        ConfigurePacket::Type::Backlight,
+                        ConfigurePacket::Val::BacklightAck);
+                    break;
+            }
+            break;
+        case ConfigurePacket::Type::ResetDmp:
+            mpu.resetDMP();
+            mpu.resetFIFO();
+            mpu.resetSensors();
+            mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
+            PacketUtils::sendConfigureAck(
+                ConfigurePacket::Type::ResetDmp,
+                ConfigurePacket::Val::ResetDmpAck);
+            break;
+    }
+}
+
 void receivePackets()
 {
     scheduler.schedule(receivePackets);
@@ -208,54 +276,14 @@ void receivePackets()
     if (serial.tryDequeueInbound(packet))
     {
         display.overlayClear();
-        display.overlayPrintf(display.cols - 2, 1, 1000, "%d", serial.getPacketCount());
+        std::string s = Utils::stringSprintf("|%d|", serial.getPacketCount());
+        display.overlayPrintf(display.cols - s.length(), 1, 1000, s.c_str());
         switch ((PacketType)packet.type)
         {
             case PacketType::Configure:
             {
                 ConfigurePacket con = PacketUtils::innerAs<ConfigurePacket>(packet);
-                switch (con.type)
-                {
-                    case ConfigurePacket::Type::Backlight:
-                        switch (con.value)
-                        {
-                            case ConfigurePacket::Val::BacklightGet:
-                                PacketUtils::send(PacketType::Configure, ConfigurePacket
-                                    {
-                                        ConfigurePacket::Type::Backlight,
-                                        display.getBacklight()
-                                            ? ConfigurePacket::Val::BacklightResultOn
-                                            : ConfigurePacket::Val::BacklightResultOff
-                                    });
-                                break;
-                            case ConfigurePacket::Val::BacklightSetOff:
-                                display.setBacklight(false);
-                                PacketUtils::sendConfigureAck(
-                                    ConfigurePacket::Type::Backlight,
-                                    ConfigurePacket::Val::BacklightAck);
-                                break;
-                            case ConfigurePacket::Val::BacklightSetOn:
-                                display.setBacklight(true);
-                                PacketUtils::sendConfigureAck(
-                                    ConfigurePacket::Type::Backlight,
-                                    ConfigurePacket::Val::BacklightAck);
-                                break;
-                            case ConfigurePacket::Val::BacklightSetToggle:
-                                display.toggleBacklight();
-                                PacketUtils::sendConfigureAck(
-                                    ConfigurePacket::Type::Backlight,
-                                    ConfigurePacket::Val::BacklightAck);
-                                break;
-                        }
-                        break;
-                    case ConfigurePacket::Type::ResetDmp:
-                        mpu.resetDMP();
-                        mpu.resetFIFO();
-                        PacketUtils::sendConfigureAck(
-                            ConfigurePacket::Type::ResetDmp,
-                            ConfigurePacket::Val::ResetDmpAck);
-                        break;
-                }
+                handleConfigurePacket(con);
                 break;
             }
         }
@@ -276,7 +304,7 @@ static TaskTimeoutCallback timeoutCallback;
 // Mpu6050 addr: 0x68
 // Lcd addr: 0x27
 void loop() {
-    if (!dmpReady) return;
+    // if (!dmpReady) return;
     scheduler.setTaskTimeout(TIMEOUT_2S);
     scheduler.setSupervisionCallback(&timeoutCallback);
     scheduler.schedule(updateBtns);

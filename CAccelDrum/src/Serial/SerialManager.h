@@ -25,9 +25,9 @@ public:
 
     bool tryDequeueInbound(SerialPacket& outPacket);
 
-    int getPacketCount() const;
+    uint32_t getPacketCount() const;
 
-    int getCorruptedPacketCount() const;
+    uint32_t getCorruptedPacketCount() const;
 
 private:
     CircularBuffer<byte, sizeof(SerialPacket) * 2> parsingQueue;
@@ -35,8 +35,8 @@ private:
     CRC32 crcOut;
     CRC32 crcIn;
     uint64_t lastLong;
-    int packetCount;
-    int corruptedPacketCount;
+    uint32_t packetCount;
+    uint32_t corruptedPacketCount;
     std::mutex inboundQueueMutex;
 
     void receive();

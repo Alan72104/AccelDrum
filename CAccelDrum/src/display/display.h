@@ -22,7 +22,7 @@ public:
 
     virtual void run() override;
 
-    // Return true if all 3 dispaly buffers' trailing null char and magic number aren't overridden,
+    // Returns true if all 3 dispaly buffers' trailing null char and magic number aren't overridden,
     // when corruption is detected, also writes "buffer" "corrupt" to the end,
     // and resets the trailing null char and magic number,
     // execution should not continue after the corruption

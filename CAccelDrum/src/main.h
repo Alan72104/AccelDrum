@@ -1,7 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <Bounce2.h>
-#include <MPU6050_6Axis_MotionApps20.h>
+#include <MPU6050.h>
 
 constexpr uint64_t oneSecMillis = 1000;
 constexpr uint32_t buttonPin1 = 36;

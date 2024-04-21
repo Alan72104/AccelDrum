@@ -9,6 +9,7 @@ public enum PacketType
 {
     None,
     Accel,
+    RawAccel,
     Text,
     Configure,
     Count
@@ -25,7 +26,22 @@ public struct AccelPacket
 
     [InlineArray(64)]
     private struct Padding { private byte element0; }
-};
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct RawAccelPacket
+{
+    public struct Pack
+    {
+        public uint DeltaMicros;
+        public Vector3 Accel;
+        public Vector3 Gyro;
+    }
+    public PackArray Packs;
+
+    [InlineArray(4)]
+    public struct PackArray { private Pack element0; }
+}
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 public struct TextPacket
@@ -63,7 +79,7 @@ public struct ConfigurePacket
 
     public Typ Type;
     public Val Value;
-    private Padding padding;
+    public ExtraData Data;
 
     public ConfigurePacket(Typ type, Val value)
     {
@@ -72,5 +88,5 @@ public struct ConfigurePacket
     }
 
     [InlineArray(104)]
-    private struct Padding { private byte element0; }
+    public struct ExtraData { private byte element0; }
 }

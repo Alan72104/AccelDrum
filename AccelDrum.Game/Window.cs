@@ -9,7 +9,6 @@ using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
-using Serilog;
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -64,7 +63,6 @@ public class Window : GameWindow
     protected override void OnLoad()
     {
         base.OnLoad();
-        AppDomain.CurrentDomain.UnhandledException += CurrentDomain_UnhandledException;
         changeWindowTitle();
         GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
@@ -109,20 +107,7 @@ public class Window : GameWindow
         //this.UpdateFrequency = 70.0;
 
         accel = new AccelDevice(meshManager);
-        //DebugRenderer.Ins.AddMeshes(
-        //[
-        //    meshMain,
-        //    meshCubes,
-        //    meshGround,
-        //]);
         DebugRenderer.Ins.AddAllMeshes();
-    }
-
-    private void CurrentDomain_UnhandledException(object sender, UnhandledExceptionEventArgs e)
-    {
-        if (e.IsTerminating)
-            Log.Fatal("Terminating");
-        Log.Fatal(e.ExceptionObject.ToString() ?? "");
     }
 
     protected override void OnResize(ResizeEventArgs e)

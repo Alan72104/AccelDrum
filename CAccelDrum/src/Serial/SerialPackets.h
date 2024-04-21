@@ -7,6 +7,7 @@ enum class PacketType : uint32_t
 {
     None,
     Accel,
+    RawAccel,
     Text,
     Configure,
     Count
@@ -48,6 +49,19 @@ struct AccelPacket
     byte padding[SerialPacket::sizeInner - sizeof(uint64_t) - sizeof(float) * 10];
 } __attribute__((packed));
 
+struct RawAccelPacket
+{
+    struct Pack
+    {
+        uint32_t deltaMicros;
+        float ax, ay, az;
+        float gx, gy, gz;
+    };
+    static constexpr uint32_t packCount = sizeof(SerialPacket::Inner) / sizeof(Pack);
+    std::array<Pack, packCount> packs;
+    byte padding[sizeof(SerialPacket::Inner) - sizeof(packs)];
+} __attribute__((packed));
+
 struct TextPacket
 {
     static constexpr size_t sizeStr = SerialPacket::sizeInner - sizeof(uint32_t) - sizeof(bool);
@@ -77,7 +91,8 @@ struct ConfigurePacket
         BacklightSetToggle,
         ResetDmpAck
     };
+    static constexpr size_t sizeData = SerialPacket::sizeInner - sizeof(Type) - sizeof(Val);
     Type type;
     Val value;
-    byte padding[SerialPacket::sizeInner - sizeof(uint32_t) * 2];
+    std::array<byte, sizeData> data;
 } __attribute__((packed));
