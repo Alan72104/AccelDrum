@@ -212,8 +212,8 @@ public class Window : GameWindow
             ImGui.Checkbox("Vsync", ref vsync);
             this.VSync = vsync ? VSyncMode.On : VSyncMode.Off;
 
-            ImGui.ColorEdit3("Triangle color", ref _color.Interchange());
-            var pos = _camera.Position; ImGui.DragFloat3("Pos", ref pos.Interchange()); _camera.Position = pos;
+            ImGui.ColorEdit3("Triangle color", ref _color.InterchangeRef());
+            var pos = _camera.Position; ImGui.DragFloat3("Pos", ref pos.InterchangeRef()); _camera.Position = pos;
             ImGui.SameLine();
             if (ImGui.Button("Reset"))
                 _camera.Position = new Vector3(0, 2, 2);
@@ -225,7 +225,7 @@ public class Window : GameWindow
             //(_camera.Yaw, _camera.Pitch) = VectorUtils.ToYawPitch(_camera.Position, Vector3.Zero);
             ImGui.PopID();
             //var pitch = _camera.Pitch; ImGui.DragFloat("Pitch", ref pitch, 0.5f); _camera.Pitch = pitch;
-            ImGui.ColorEdit3("Ambient color", ref ambientColor.Interchange());
+            ImGui.ColorEdit3("Ambient color", ref ambientColor.InterchangeRef());
             ImGui.DragFloat("Ambient strength", ref ambientStrength, 0.005f, 0, 1);
             if (ImGui.Button("Clear"))
             {
@@ -265,7 +265,7 @@ public class Window : GameWindow
             {
                 System.Numerics.Vector2 size = new(-1, 50);
                 ImGui.PlotLines("frametime", ref frametimeHistory.Ref, frametimeHistory.Length,
-                    0, null, 0, 1000.0f / 60,
+                    0, null, 0, 1000.0f / 30,
                     size, frametimeHistory.ElementSize);
             }
             ImGui.End();

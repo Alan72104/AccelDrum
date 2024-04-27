@@ -1,8 +1,10 @@
 ﻿using AccelDrum.Game.Accel;
+using AccelDrum.Game.Extensions;
 using AccelDrum.Game.Graphics;
 using AccelDrum.Game.Serial;
 using AccelDrum.Game.Utils;
 using ImGuiNET;
+using ImuFusion;
 using OpenTK.Mathematics;
 using Serilog;
 using System;
@@ -35,6 +37,8 @@ public class AccelDevice : IDisposable
     private Mesh meshTestCube = null!;
     private MeshManager meshManager = null!;
     private Vector3 velocity = new();
+    private FusionAhrs ahrs = null!;
+    private FusionOffset fusionOffset = null!;
 
     public AccelDevice(MeshManager meshManager)
     {
@@ -74,76 +78,15 @@ public class AccelDevice : IDisposable
             switch (type)
             {
                 case PacketType.Accel:
-                    {
-                        AccelPacket p = native.GetInnerAs<AccelPacket>();
-                        p = p with
-                        {
-                            Accel = ConvertAxes(p.Accel),
-                            Gyro = ConvertAxes(p.Gyro),
-                            GyroEuler = ConvertAxes(p.GyroEuler),
-                        };
-                        if (p.DeltaMicros <= 1_000_000)
-                        {
-                            meshTestCube.RotationQuat = p.Gyro;
-                            float secs = p.DeltaMicros / 1_000_000.0f;
-                            velocity += p.Accel * secs;
-                            meshTestCube.Position += p.Accel * secs * secs * 10;
-                        }
-                        break;
-                    }
+                    HandlePacketAccel(native.GetInnerAs<AccelPacket>());
+                    break;
                 case PacketType.RawAccel:
-                    {
-                        RawAccelPacket p = native.GetInnerAs<RawAccelPacket>();
-                        foreach (RawAccelPacket.Pack packNat in p.Packs)
-                        {
-                            var pack = packNat with
-                            {
-                                Accel = ConvertAxes(packNat.Accel),
-                                Gyro = ConvertAxes(packNat.Gyro),
-                            };
-                            latestAccelPacketNative = SerialPacket<RawAccelPacket>.RefFromUntyped(ref native);
-                            dataArrived = true;
-                            if (pack.DeltaMicros <= 1_000_000)
-                            {
-                                meshTestCube.Rotation = pack.Gyro;
-                                float secs = pack.DeltaMicros / 1_000_000.0f;
-                                velocity += pack.Accel * secs;
-                                //meshTestCube.Position += pack.Accel * secs * secs * 10;
-                            }
-                        }
-                        break;
-                    }
+                    latestAccelPacketNative = SerialPacket<RawAccelPacket>.RefFromUntyped(ref native);
+                    HandlePacketRawAccel(native.GetInnerAs<RawAccelPacket>());
+                    break;
                 case PacketType.Text:
-                    {
-                        TextPacket p = native.GetInnerAs<TextPacket>();
-                        if (p.Length > 0)
-                        {
-                            ReadOnlySpan<byte> span = MemoryMarshal.CreateReadOnlySpan(ref p.Str[0], (int)p.Length);
-                            if (p.HasNext)
-                            {
-                                sbFromAccel.AddRange(span);
-                            }
-                            else
-                            {
-                                if (sbFromAccel.Count > 0)
-                                {
-                                    sbFromAccel.AddRange(span);
-                                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
-                                    stringsFromAccel.Add(str);
-                                    sbFromAccel.Clear();
-                                }
-                                else
-                                {
-                                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
-                                    stringsFromAccel.Add(str);
-                                }
-                                if (stringsFromAccel.Count > 5)
-                                    stringsFromAccel.RemoveAt(0);
-                                stringsFromAccelFull = string.Join("", stringsFromAccel);
-                            }
-                        }
-                        break;
-                    }
+                    HandlePacketText(native.GetInnerAs<TextPacket>());
+                    break;
                 case PacketType.Configure:
                     {
                         ConfigurePacket p = native.GetInnerAs<ConfigurePacket>();
@@ -157,6 +100,85 @@ public class AccelDevice : IDisposable
         }
     }
 
+    private void HandlePacketAccel(AccelPacket p)
+    {
+        p = p with
+        {
+            Accel = ConvertAxes(p.Accel),
+            Gyro = ConvertAxes(p.Gyro),
+            GyroEuler = ConvertAxes(p.GyroEuler),
+        };
+        if (p.DeltaMicros <= 1_000_000)
+        {
+            meshTestCube.RotationQuat = p.Gyro;
+            float secs = p.DeltaMicros / 1_000_000.0f;
+            velocity += p.Accel * secs;
+            meshTestCube.Position += p.Accel * secs * secs * 10;
+        }
+    }
+
+    private void HandlePacketRawAccel(RawAccelPacket p)
+    {
+        foreach (RawAccelPacket.Pack packNat in p.Packs)
+        {
+            var pack = packNat with
+            {
+                Accel = ConvertAxes(packNat.Accel),
+                Gyro = ConvertAxes(packNat.Gyro),
+            };
+            dataArrived = true;
+            //if (pack.DeltaMicros <= 1_000_000)
+            //{
+            //    meshTestCube.Rotation = pack.Gyro;
+            //    float secs = pack.DeltaMicros / 1_000_000.0f;
+            //    velocity += pack.Accel * secs;
+            //meshTestCube.Position += pack.Accel * secs * secs * 10;
+            //}
+            if (pack.DeltaMicros <= 1_000_000 / 100)
+            {
+                var secsElapsed = pack.DeltaMicros / 1_000_000.0f;
+                var gyro = fusionOffset.Update(pack.Gyro.Interchange());
+                ahrs.UpdateNoMagnetometer(
+                    gyro,
+                    pack.Accel.Interchange(),
+                    secsElapsed);
+
+                meshTestCube.Position += ahrs.GetEarthAcceleration().Interchange() * secsElapsed * secsElapsed;
+                meshTestCube.RotationQuat = ahrs.Quaternion.Interchange();
+            }
+        }
+    }
+
+    private void HandlePacketText(TextPacket p)
+    {
+        if (p.Length > 0)
+        {
+            ReadOnlySpan<byte> span = MemoryMarshal.CreateReadOnlySpan(ref p.Str[0], (int)p.Length);
+            if (p.HasNext)
+            {
+                sbFromAccel.AddRange(span);
+            }
+            else
+            {
+                if (sbFromAccel.Count > 0)
+                {
+                    sbFromAccel.AddRange(span);
+                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
+                    stringsFromAccel.Add(str);
+                    sbFromAccel.Clear();
+                }
+                else
+                {
+                    string str = Encoding.UTF8.GetString(sbFromAccel.ToArray()).Replace('\0', ' ');
+                    stringsFromAccel.Add(str);
+                }
+                if (stringsFromAccel.Count > 5)
+                    stringsFromAccel.RemoveAt(0);
+                stringsFromAccelFull = string.Join("", stringsFromAccel);
+            }
+        }
+    }
+
     public void Draw()
     {
         meshTestCube.Draw();
@@ -164,18 +186,22 @@ public class AccelDevice : IDisposable
 
     private void Connect(string name)
     {
-        using (_ = new Timer2(
+        using (new Timer2(
             time => Log.Information($"Connection took {time.TotalMicroseconds:n0} us")))
         {
             serial.Connect(name, 1_000_000);
         }
         packetTimeHistory.Clear();
         packetTimer.Restart();
+
+        ahrs = new FusionAhrs(new FusionAhrsSettings(
+            gyroscopeRange: 1000.0f));
+        fusionOffset = new(100);
     }
 
     private void Disconnect()
     {
-        using (_ = new Timer2(
+        using (new Timer2(
             time => Log.Information($"Disconnection took {time.TotalMicroseconds:n0} us")))
         {
             serial.Disconnect();

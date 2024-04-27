@@ -26,9 +26,9 @@ MPU6050 mpu;
 
 bool blinkState = false;
 uint64_t lastBlinkMillis = 0;
-Bounce2::Button btn1 = Bounce2::Button();
-Bounce2::Button btn2 = Bounce2::Button();
-VectorFloat accumulatedPos = VectorFloat();
+Bounce2::Button btn1;
+Bounce2::Button btn2;
+VectorFloat accumulatedPos;
 
 // MPU control/status vars
 bool dmpReady = false;  // set true if DMP init was successful
@@ -72,10 +72,10 @@ void setup() {
     mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
     // pinMode(interruptPin, INPUT);
 
-    // mpu.setXGyroOffset(220);
-    // mpu.setYGyroOffset(76);
-    // mpu.setZGyroOffset(-85);
-    // mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+    mpu.setXGyroOffset(220);
+    mpu.setYGyroOffset(76);
+    mpu.setZGyroOffset(-85);
+    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
 
     if (devStatus == 0)
     {

@@ -318,7 +318,7 @@ public class DebugRenderer : IDisposable
     {
         ImGui.PushID(label);
         ImGui.SetNextItemWidth(140);
-        if (DragFloat3(label, ref v.Interchange(), v_speed, float.MinValue, float.MaxValue, "%.1f"))
+        if (DragFloat3(label, ref v.InterchangeRef(), v_speed, float.MinValue, float.MaxValue, "%.1f"))
             mesh.DirtyModel = true;
         ImGui.SameLine();
         if (ImGui.Button("x"))
@@ -332,23 +332,21 @@ public class DebugRenderer : IDisposable
     private static void DragEuler(string label, Mesh mesh)
     {
         ImGui.PushID(label);
-        //ImGui.PushItemWidth(ImGui.CalcItemWidth());
         var rot = mesh.Rotation;
         ImGui.SetNextItemWidth(125);
-        if (ImGui.DragFloat3(label, ref rot.Interchange(), 1.0f, -180, 180, "%.1f"))
+        if (ImGui.DragFloat3(label, ref rot.InterchangeRef(), 1.0f, -180, 180, "%.1f"))
             mesh.Rotation = rot;
 
         ImGui.SameLine();
         if (ImGui.Button("x"))
             mesh.Rotation = Vector3.Zero;
         ImGui.PopID();
-        //ImGui.PopItemWidth();
     }
 
     private static void DragQuatAsEulerAndW(string label, Mesh mesh, ref Quaternion q, float v_speed)
     {
         Vector3 e = q.ToEulerAngles() / MathF.PI * 180;
-        if (DragFloat3(label + "euler", ref e.Interchange(), 1f, -179.5f, 179.5f, "%.1f"))
+        if (DragFloat3(label + "euler", ref e.InterchangeRef(), 1f, -179.5f, 179.5f, "%.1f"))
         {
             q = Quaternion.FromEulerAngles(e / 180 * MathF.PI);
             q.Normalize();
