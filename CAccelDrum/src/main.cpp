@@ -21,37 +21,22 @@
 // specific I2C addresses may be passed as a parameter here
 // AD0 low = 0x68 (default for SparkFun breakout and InvenSense evaluation board)
 // AD0 high = 0x69
-MPU6050 mpu;
-//MPU6050 mpu(0x69); // <-- use for AD0 high
+
+// Mpu6050 addr: 0x68, 0x69
+// Lcd addr: 0x27
+MPU6050 mpus[4] =
+{
+    MPU6050(0x68),
+    MPU6050(0x69),
+    MPU6050(0x68, &Wire1),
+    MPU6050(0x69, &Wire1),
+};
 
 bool blinkState = false;
 uint64_t lastBlinkMillis = 0;
 Bounce2::Button btn1;
 Bounce2::Button btn2;
-VectorFloat accumulatedPos;
-
-// MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
-
-// orientation/motion vars
-Quaternion q;           // [w, x, y, z]         quaternion container
-VectorInt16 aa;         // [x, y, z]            accel sensor measurements
-VectorInt16 aaReal;     // [x, y, z]            gravity-free accel sensor measurements
-VectorInt16 aaWorld;    // [x, y, z]            world-frame accel sensor measurements
-VectorFloat gravity;    // [x, y, z]            gravity vector
-float euler[3];         // [psi, theta, phi]    Euler angle container
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
-
-volatile bool mpuInterrupt = false;
-void dmpDataReady() {
-    mpuInterrupt = true;
-    display.print(display.cols - 1, 0, '+');
-}
+uint64_t lastPollMillis = 0;
 
 void setup() {
     pinMode(ledPinDebug, OUTPUT);
@@ -60,8 +45,10 @@ void setup() {
     // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
-        Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
-    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
+        Wire.setClock(400000);
+        Wire1.begin(wire1Sda, wire1Scl);
+        Wire1.setClock(400000);
+    #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE // TODO: Remove this
         Fastwire::setup(400, true);
     #endif
     
@@ -69,32 +56,54 @@ void setup() {
     display.setBacklight(true);
     serial.init();
 
-    mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
+    display.clear();
+    display.printf(0, 0, "Init mpu");
+    display.update();
+    for (MPU6050 &mpu : mpus)
+        mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
     // pinMode(interruptPin, INPUT);
 
-    mpu.setXGyroOffset(220);
-    mpu.setYGyroOffset(76);
-    mpu.setZGyroOffset(-85);
-    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
-
-    if (devStatus == 0)
+    display.clear();
+    display.printf(0, 0, "Mpu set offset");
+    display.update();
+    for (MPU6050 &mpu : mpus)
     {
-        mpu.CalibrateAccel(6);
-        mpu.CalibrateGyro(6);
-
-        // attachInterrupt(digitalPinToInterrupt(interruptPin), dmpDataReady, RISING);
-        // mpuIntStatus = mpu.getIntStatus();
-        // dmpReady = true;
-    }
-    else
-    {
-        // ERROR!
-        // 1 = initial memory load failed
-        // 2 = DMP configuration updates failed
-        // (if it's going to break, usually the code will be 1)
-        PacketUtils::printfToPackets("DMP Initialization failed (code %u)\n", devStatus);
+        mpu.setXGyroOffset(220);
+        mpu.setYGyroOffset(76);
+        mpu.setZGyroOffset(-85);
+        mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
     }
 
+    display.clear();
+    display.printf(0, 0, "Mpu calibrate");
+    display.printf(0, 1, "?-?-?-?");
+    display.update();
+    static auto calibrate = [](uint8_t i)
+    {
+        mpus[i].CalibrateAccel(6);
+        mpus[i].CalibrateGyro(6);
+        {
+            auto lock = display.lock();
+            display.print(i * 2, 1, 'v');
+            display.update();
+        }
+    };
+    static volatile bool otherHalfDone = false;
+    auto doOtherHalf = [](void *data) {
+        calibrate(2);
+        calibrate(3);
+        otherHalfDone = true;
+        vTaskDelete(nullptr);
+    };
+    TaskHandle_t task;
+    xTaskCreatePinnedToCore(doOtherHalf, "NAME", 2048, nullptr, tskIDLE_PRIORITY, &task, 0);
+    calibrate(0);
+    calibrate(1);
+    while (!otherHalfDone)
+        ;
+    
+    display.printf(0, 0, "Set pins");
+    display.update();
     pinMode(LED_BUILTIN, OUTPUT);
     btn1.attach(buttonPin1, INPUT); // Internal pullup isn't strong enough to not trigger interrupt
     btn1.interval(5);
@@ -105,79 +114,56 @@ void setup() {
     analogWrite(ledPinDebug, 0);
 }
 
-uint64_t lastSendMicros = 0;
-std::array<RawAccelPacket::Pack, RawAccelPacket::packCount> batchingBuffer;
-uint32_t batchingBufferIndex = 0;
+uint64_t lastSendMicros[4];
 uint32_t batchesSent = 0;
 
 void processDmpPacket()
 {
-    scheduler.scheduleDelayed(processDmpPacket, 10);
-    mpuInterrupt = false;
-    display.print(display.cols - 1, 0, '\0');
+    display.clear();
 
-    int16_t ax, ay, az;
-    int16_t gx, gy, gz;
-
-    mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
-
-    // mpu.dmpGetQuaternion(&q, fifoBuffer);
-    // mpu.dmpGetAccel(&aa, fifoBuffer);
-    // mpu.dmpGetGravity(&gravity, &q);
-    // mpu.dmpGetLinearAccel(&aaReal, &aa, &gravity);
-    // mpu.dmpGetEuler(euler, &q);
-    // memcpy(&aaWorld, &aaReal, sizeof(VectorInt16)); // World accel
-    // aaWorld.rotate(&q);
-    uint64_t micro = micros();
-    float ares = mpu.get_acce_resolution();
-    float gres = mpu.get_gyro_resolution();
-    RawAccelPacket::Pack pack =
+    if (millis() - lastPollMillis <= 1500)
     {
-        .deltaMicros = (uint32_t)min(micro - lastSendMicros, (uint64_t)std::numeric_limits<uint32_t>::max()),
-        .ax = ax * ares,
-        .ay = ay * ares,
-        .az = az * ares,
-        .gx = gx * gres,
-        .gy = gy * gres,
-        .gz = gz * gres,
-    };
-    batchingBuffer[batchingBufferIndex++] = pack;
-    if (batchingBufferIndex >= RawAccelPacket::packCount)
-    {
-        batchingBufferIndex = 0;
-        RawAccelPacket packet =
+        RawAccelPacket packet = {0};
+
+        auto getData = [&](uint8_t i)
         {
-            .packs = batchingBuffer
+            uint64_t micro = micros();
+            int16_t ax, ay, az;
+            int16_t gx, gy, gz;
+            mpus[i].getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+            float ares = mpus[i].get_acce_resolution();
+            float gres = mpus[i].get_gyro_resolution();
+            RawAccelPacket::Pack pack =
+            {
+                .deltaMicros = (uint32_t)min(micro - lastSendMicros[i], (uint64_t)std::numeric_limits<uint32_t>::max()),
+                .ax = ax * ares,
+                .ay = ay * ares,
+                .az = az * ares,
+                .gx = gx * gres,
+                .gy = gy * gres,
+                .gz = gz * gres,
+            };
+            packet.packs[i] = pack;
+            lastSendMicros[i] = micro;
         };
+        for (uint8_t i = 0; i < 4; i++)
+            getData(i);
         PacketUtils::send(PacketType::RawAccel, packet);
         batchesSent++;
+
+        display.print(display.cols - 1, 1, '*');
+        
+        scheduler.scheduleDelayed(processDmpPacket, 10);
     }
-    // AccelPacket packet =
-    // {
-    //     .deltaMicros = micro - lastSendMicros,
-    //     .ax = aaWorld.x * mpu.get_acce_resolution(),
-    //     .ay = aaWorld.y * mpu.get_acce_resolution(),
-    //     .az = aaWorld.z * mpu.get_acce_resolution(),
-    //     .gx = q.x * mpu.get_gyro_resolution(),
-    //     .gy = q.y * mpu.get_gyro_resolution(),
-    //     .gz = q.z * mpu.get_gyro_resolution(),
-    //     .gw = q.w * mpu.get_gyro_resolution(),
-    //     .ex = euler[0],
-    //     .ey = euler[1],
-    //     .ez = euler[2],
-    // };
-    lastSendMicros = micro;
-    // PacketUtils::send(PacketType::Accel, packet);
-    display.clear();
-    display.printf(0, 1, "%u", batchesSent);
-    // display.printf(0, 0, "% 5.0f% 5.0f% 5.0f",
-    //     aaWorld.x * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
-    //     aaWorld.y * mpu.get_acce_resolution() * mpu.get_acce_resolution(),
-    //     aaWorld.z * mpu.get_acce_resolution() * mpu.get_acce_resolution());
-    // display.printf(0, 1, "% 5.0f% 5.0f% 5.0f",
-    //     euler[0] / PI * 180,
-    //     euler[1] / PI * 180,
-    //     euler[2] / PI * 180);
+    else
+    {
+        scheduler.scheduleDelayed(processDmpPacket, 100);
+    }
+
+    uint32_t secs = millis() / 1000;
+    char numSentMetric[10];
+    Utils::formatMetric(numSentMetric, 10, batchesSent);
+    display.printf(0, 1, "%u:%u:%u %s", secs / 3600, secs / 60 % 60, secs % 60, numSentMetric);
     return;
 }
 
@@ -188,7 +174,6 @@ void updateBtns()
     btn2.update();
     if (btn1.pressed())
     {
-        accumulatedPos = VectorFloat();
         bool bl = display.toggleBacklight();
         display.overlayClear();
         display.overlayPrintf(0, 0, 1000, bl ? "Backlight on" : "Backlight off");
@@ -205,7 +190,9 @@ void updateBtns()
 
         display.overlayClear();
         display.overlayPrintf(0, 0, 1000, "Garbage crc");
-        display.overlayPrintf(display.cols - std::strlen("packet sent"), 1, 1000, "packet sent");
+        display.overlayPrintf(display.cols - strlen("packet sent"), 1, 1000, "packet sent");
+
+        lastPollMillis = millis();
     }
 }
 
@@ -227,6 +214,9 @@ static void handleConfigurePacket(ConfigurePacket& packet)
 {
     switch (packet.type)
     {
+        case ConfigurePacket::Type::PollForData:
+            lastPollMillis = millis();
+            break;
         case ConfigurePacket::Type::Backlight:
             switch (packet.value)
             {
@@ -258,14 +248,28 @@ static void handleConfigurePacket(ConfigurePacket& packet)
             }
             break;
         case ConfigurePacket::Type::ResetDmp:
-            mpu.resetDMP();
-            mpu.resetFIFO();
-            mpu.resetSensors();
-            mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
+        {
+            mpus[0].resetDMP();
+            mpus[0].resetFIFO();
+            mpus[0].resetSensors();
+            mpus[0].initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
+            mpus[0].CalibrateAccel(6);
+            mpus[0].CalibrateGyro(6);
+
             PacketUtils::sendConfigureAck(
                 ConfigurePacket::Type::ResetDmp,
                 ConfigurePacket::Val::ResetDmpAck);
+            mpus[0].getFullScaleAccelRange();
+            mpus[0].getFullScaleGyroRange();
+            mpus[0].getGyroXSelfTestFactoryTrim();
+            mpus[0].getGyroYSelfTestFactoryTrim();
+            mpus[0].getGyroZSelfTestFactoryTrim();
+            mpus[0].getAccelXSelfTestFactoryTrim();
+            mpus[0].getAccelYSelfTestFactoryTrim();
+            mpus[0].getAccelZSelfTestFactoryTrim();
+            int16_t * offsets = mpus[0].GetActiveOffsets();
             break;
+        }
     }
 }
 
@@ -277,7 +281,7 @@ void receivePackets()
     {
         display.overlayClear();
         std::string s = Utils::stringSprintf("|%d|", serial.getPacketCount());
-        display.overlayPrintf(display.cols - s.length(), 1, 1000, s.c_str());
+        display.overlayPrintf(display.cols - s.length(), 0, 1000, s.c_str());
         switch ((PacketType)packet.type)
         {
             case PacketType::Configure:
@@ -292,7 +296,7 @@ void receivePackets()
 
 class TaskTimeoutCallback : public Runnable
 {
-    void run()
+    void run() override
     {
         while (1)
             ;
@@ -301,10 +305,9 @@ class TaskTimeoutCallback : public Runnable
 
 static TaskTimeoutCallback timeoutCallback;
 
-// Mpu6050 addr: 0x68
-// Lcd addr: 0x27
 void loop() {
-    // if (!dmpReady) return;
+    display.printf(0, 0, "Set sched");
+    display.update();
     scheduler.setTaskTimeout(TIMEOUT_2S);
     scheduler.setSupervisionCallback(&timeoutCallback);
     scheduler.schedule(updateBtns);
@@ -313,6 +316,8 @@ void loop() {
     scheduler.schedule(receivePackets);
     scheduler.schedule(&display);
     scheduler.schedule(&serial);
-    scheduler.execute();
+    display.printf(0, 0, "Sched run");
+    display.update();
+    scheduler.execute(); // Does not return
 }
 

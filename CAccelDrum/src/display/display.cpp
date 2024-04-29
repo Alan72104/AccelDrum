@@ -16,7 +16,8 @@ Display::Display() : lcd(0x27, 20, 4),
                      lcdBufOverlay{},
                      lcdBufNew{},
                      lcdBufOld{},
-                     backlight(false)
+                     backlight(false),
+                     theLock()
 {
     init();
 }
@@ -25,6 +26,8 @@ void Display::init()
 {
     for (uint32_t row = 0; row < bufRows; row++)
     {
+        memset(lcdBufOld[row], ' ', cols);
+        memset(lcdBufNew[row], ' ', cols);
         *reinterpret_cast<uint32_t*>(&lcdBufOld[row][cols + 1]) = 0xDEADBEFF;
         *reinterpret_cast<uint32_t*>(&lcdBufNew[row][cols + 1]) = 0xDEADBEFF;
         *reinterpret_cast<uint32_t*>(&lcdBufOverlay[row][cols + 1]) = 0xDEADBEFF;
@@ -35,7 +38,7 @@ void Display::init()
 void Display::clear()
 {
     for (uint32_t j = 0; j < rows; j++)
-        std::memset(lcdBufNew[j], '\0', cols);
+        memset(lcdBufNew[j], ' ', cols);
 }
 
 void Display::setBacklight(bool v)
@@ -62,11 +65,16 @@ bool Display::getBacklight() const
     return backlight;
 }
 
+ScopedLocker Display::lock()
+{
+    return theLock.lock();
+}
+
 void Display::overlayClear()
 {
     lcdOverlayTimeoutMillis = 0;
     for (uint32_t j = 0; j < rows; j++)
-        std::memset(lcdBufOverlay[j], '\0', cols);
+        memset(lcdBufOverlay[j], '\0', cols);
 }
 
 bool Display::bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char* s, va_list args)
@@ -122,15 +130,18 @@ bool Display::checkBufIntegrity()
     {
         if (lcdBufOld[j][cols] != '\0' ||
             lcdBufNew[j][cols] != '\0' ||
+            lcdBufOverlay[j][cols] != '\0' ||
+            memchr(lcdBufOld[j], '\0', cols) ||
+            memchr(lcdBufNew[j], '\0', cols) ||
             *reinterpret_cast<uint32_t*>(&lcdBufOld[j][cols + 1]) != 0xDEADBEFF ||
             *reinterpret_cast<uint32_t*>(&lcdBufNew[j][cols + 1]) != 0xDEADBEFF ||
             *reinterpret_cast<uint32_t*>(&lcdBufOverlay[j][cols + 1]) != 0xDEADBEFF)
         {
             lcdOverlayTimeoutMillis = 0;
-            std::strcpy(lcdBufOld[0] + cols - std::strlen("buffer"), "buffer");
-            std::strcpy(lcdBufOld[1] + cols - std::strlen("corrupt"), "corrupt");
-            std::strcpy(lcdBufNew[0] + cols - std::strlen("buffer"), "buffer");
-            std::strcpy(lcdBufNew[1] + cols - std::strlen("corrupt"), "corrupt");
+            strcpy(lcdBufOld[0] + cols - strlen("buffer"), "buffer");
+            strcpy(lcdBufOld[1] + cols - strlen("corrupt"), "corrupt");
+            strcpy(lcdBufNew[0] + cols - strlen("buffer"), "buffer");
+            strcpy(lcdBufNew[1] + cols - strlen("corrupt"), "corrupt");
             return false;
         }
     }
@@ -150,10 +161,10 @@ void Display::update()
         while (true);
     }
     else if (lcdOverlayTimeoutMillis ||
-        std::memcmp(lcdBufOld, lcdBufNew, (bufCols * bufRows)) != 0)
+        memcmp(lcdBufOld, lcdBufNew, (bufCols * bufRows)) != 0)
     {
         for (uint32_t j = 0; j < bufRows; j++)
-            std::memcpy(lcdBufOld[j], lcdBufNew[j], cols);
+            memcpy(lcdBufOld[j], lcdBufNew[j], cols);
 
         if (lcdOverlayTimeoutMillis)
         {

@@ -3,6 +3,7 @@
 #include <LiquidCrystal_I2C.h>
 #define LIBCALL_DEEP_SLEEP_SCHEDULER
 #include <DeepSleepScheduler.h>
+#include "Utils/Lock.h"
 
 class Display;
 extern Display display;
@@ -10,9 +11,13 @@ extern Display display;
 class Display : public Runnable
 {
 public:
+    // The dispaly cols
     static constexpr uint32_t cols = 16;
+    // The buffer cols (display cols + terminating null + DEADBEFF)
     static constexpr uint32_t bufCols = cols + 1 + sizeof(uint32_t);
+    // The dispaly rows
     static constexpr uint32_t rows = 2;
+    // The buffer rows (same as display rows)
     static constexpr uint32_t bufRows = rows;
 
     Display();
@@ -43,6 +48,9 @@ public:
     // Gets the backlight
     bool getBacklight() const;
 
+    // Locks the lock for external use
+    ScopedLocker lock();
+
     // Returns true if col and row and final string length are within the range,
     // string is truncated if length is longer than cols
     bool printf(uint32_t col, uint32_t row, const char* s, ...);
@@ -66,9 +74,10 @@ private:
     LiquidCrystal_I2C lcd;
     uint64_t lcdOverlayTimeoutMillis;
     char lcdBufOverlay[bufRows][bufCols]; // '\0' in the overlay means transparent
-    char lcdBufNew[bufRows][bufCols];
-    char lcdBufOld[bufRows][bufCols];
+    char lcdBufNew[bufRows][bufCols]; // Spaces should be filled with ' '
+    char lcdBufOld[bufRows][bufCols]; // Spaces should be filled with ' '
     bool backlight;
+    Lock theLock;
 
     bool bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char* s, va_list args);
     bool bufPrint(char buf[bufRows][bufCols], uint32_t col, uint32_t row, const char c);

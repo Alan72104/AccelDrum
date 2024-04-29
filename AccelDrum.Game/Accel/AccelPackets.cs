@@ -24,7 +24,7 @@ public struct AccelPacket
     public Vector3 GyroEuler;
     private Padding padding;
 
-    [InlineArray(64)]
+    [InlineArray(SerialPacket.SizeInner - sizeof(ulong) - sizeof(float) * 10)]
     private struct Padding { private byte element0; }
 }
 
@@ -38,9 +38,13 @@ public struct RawAccelPacket
         public Vector3 Gyro;
     }
     public PackArray Packs;
+    private Padding padding;
 
     [InlineArray(4)]
     public struct PackArray { private Pack element0; }
+
+    [InlineArray(16)]
+    private struct Padding { private byte element0; }
 }
 
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -60,6 +64,7 @@ public struct ConfigurePacket
     public enum Typ
     {
         None,
+        PollForData,
         Backlight,
         ResetDmp,
         Count
@@ -87,6 +92,6 @@ public struct ConfigurePacket
         Value = value;
     }
 
-    [InlineArray(104)]
+    [InlineArray(SerialPacket.SizeInner - sizeof(Typ) - sizeof(Val))]
     public struct ExtraData { private byte element0; }
 }

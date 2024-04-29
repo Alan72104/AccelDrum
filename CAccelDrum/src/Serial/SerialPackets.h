@@ -15,7 +15,7 @@ enum class PacketType : uint32_t
 
 struct SerialPacket
 {
-    static constexpr size_t sizeExpected = 128;
+    static constexpr size_t sizeExpected = 144;
     static constexpr size_t sizeInner = sizeExpected - sizeof(PacketType) - sizeof(uint32_t) - sizeof(uint64_t);
     static constexpr uint64_t magicExpected = 0xDEADBEEF80085069;
     static constexpr uint64_t magicExpectedReversed = BitUtils::reverseBytewise(magicExpected);
@@ -56,8 +56,8 @@ struct RawAccelPacket
         uint32_t deltaMicros;
         float ax, ay, az;
         float gx, gy, gz;
-    };
-    static constexpr uint32_t packCount = sizeof(SerialPacket::Inner) / sizeof(Pack);
+    } __attribute__((packed));
+    static constexpr uint32_t packCount = 4;
     std::array<Pack, packCount> packs;
     byte padding[sizeof(SerialPacket::Inner) - sizeof(packs)];
 } __attribute__((packed));
@@ -75,6 +75,7 @@ struct ConfigurePacket
     enum class Type : uint32_t
     {
         None,
+        PollForData,
         Backlight,
         ResetDmp,
         Count
@@ -91,6 +92,12 @@ struct ConfigurePacket
         BacklightSetToggle,
         ResetDmpAck
     };
+    struct Settings
+    {
+        uint8_t accelRange;
+        uint8_t gyroRange;
+        uint8_t accel;
+    } __attribute__((packed));
     static constexpr size_t sizeData = SerialPacket::sizeInner - sizeof(Type) - sizeof(Val);
     Type type;
     Val value;

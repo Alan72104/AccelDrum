@@ -9,10 +9,16 @@ namespace AccelDrum.Game.Graphics;
 
 public class MeshManager : IDisposable
 {
+    public static MeshManager Ins { get; private set; } = null!;
     public Dictionary<string, IUniform> GlobalUniforms { get; } = new();
     public Dictionary<string, Mesh> Meshes { get; } = new();
     public Dictionary<string, Shader> Shaders { get; } = new();
     public Dictionary<string, Texture> Textures { get; } = new();
+
+    public static void Init()
+    {
+        Ins = new MeshManager();
+    }
 
     public Mesh this[string name]
     {

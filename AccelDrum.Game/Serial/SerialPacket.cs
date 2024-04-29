@@ -1,8 +1,5 @@
-﻿using Serilog;
-using System;
+﻿using System;
 using System.Buffers.Binary;
-using System.Collections;
-using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -13,7 +10,7 @@ namespace AccelDrum.Game.Serial;
 public struct SerialPacket
 {
     public static readonly int Size = Unsafe.SizeOf<SerialPacket>();
-    public const int SizeExpected = 128;
+    public const int SizeExpected = 144;
     public const int SizeInner = SizeExpected - sizeof(uint) - sizeof(uint) - sizeof(ulong);
     public const ulong MagicExpected = 0xDEADBEEF80085069;
     public static readonly ulong MagicExpectedReversed = BinaryPrimitives.ReverseEndianness(MagicExpected);

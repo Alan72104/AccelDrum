@@ -34,9 +34,9 @@ public class DebugRenderer : IDisposable
         (DebugBall, DebugBallIndexes) = ShapeUtils.Sphere(0.125f / 2, 10, 10);
     }
 
-    public static void Init(MeshManager meshManager, Mesh mesh)
+    public static void Init(Mesh mesh)
     {
-        Ins = new DebugRenderer(meshManager, mesh);
+        Ins = new DebugRenderer(MeshManager.Ins, mesh);
     }
 
     public DebugRenderer(MeshManager meshManager, Mesh mesh)

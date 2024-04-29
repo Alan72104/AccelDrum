@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO.Ports;
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace AccelDrum.Game.Serial;
 
@@ -24,6 +25,8 @@ public class SerialManager : IDisposable
     //private ConcurrentQueue<SerialPacket> outboundPackets = new(); // Outbound queue?
     private volatile int bytesRead = 0;
     private byte[] outboundBuffer = new byte[SerialPacket.Size];
+    private Thread? receiverThread = null;
+    private CancellationTokenSource receiverCancellationSource = new();
 
     public SerialManager()
     {
@@ -31,7 +34,7 @@ public class SerialManager : IDisposable
         {
             throw new NotSupportedException($"Packet size was modified {SerialPacket.SizeExpected} => {SerialPacket.Size}");
         }
-        serial.DataReceived += OnSerialDataReceived;
+        //serial.DataReceived += OnSerialDataReceived;
         serial.ErrorReceived += OnSerialErrorReceived;
     }
 
@@ -46,13 +49,23 @@ public class SerialManager : IDisposable
         serial.PortName = name;
         serial.BaudRate = baud;
         serial.Open();
+        receiverCancellationSource = new();
+        receiverThread = new Thread(ReceiveThread);
+        receiverThread.Name = "SerialReceiver";
+        receiverThread.IsBackground = true;
+        receiverThread.Priority = ThreadPriority.AboveNormal;
+        Tuple<SerialPort, CancellationToken> param = new(serial, receiverCancellationSource.Token);
+        receiverThread.Start(param);
     }
 
     public void Disconnect()
     {
         if (!Connected)
             throw new InvalidOperationException("Serial is already disconnected");
+        receiverCancellationSource.Cancel();
         serial.Close();
+        receiverThread!.Join();
+        receiverThread = null;
         parsingQueue.Clear();
         lastLong = 0;
         inboundQueue.Clear();
@@ -66,7 +79,23 @@ public class SerialManager : IDisposable
         return SerialPort.GetPortNames();
     }
 
+    private void ReceiveThread(object? param)
+    {
+        (SerialPort serial, CancellationToken cancellationToken) = (Tuple<SerialPort, CancellationToken>)param!;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            OnSerialDataReceived(serial);
+            Thread.Sleep(1);
+            Thread.Yield();
+        }
+    }
+
     private void OnSerialDataReceived(object sender, SerialDataReceivedEventArgs e)
+    {
+        OnSerialDataReceived(sender);
+    }
+
+    private void OnSerialDataReceived(object sender)
     {
         SerialPort serial = (SerialPort)sender;
         try
@@ -96,7 +125,10 @@ public class SerialManager : IDisposable
                 }
             }
         }
-        catch (Exception) { }
+        catch (Exception e)
+        {
+            Log.Warning($"{e.Message} in {nameof(OnSerialDataReceived)}", e);
+        }
     }
 
     private void OnSerialErrorReceived(object sender, SerialErrorReceivedEventArgs e)

@@ -1,10 +1,6 @@
-﻿using AccelDrum.Game.Accel;
-using AccelDrum.Game.Extensions;
-using AccelDrum.Game.Graphics;
-using AccelDrum.Game.Serial;
+﻿using AccelDrum.Game.Serial;
 using AccelDrum.Game.Utils;
 using ImGuiNET;
-using ImuFusion;
 using OpenTK.Mathematics;
 using Serilog;
 using System;
@@ -13,15 +9,16 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace AccelDrum.Game;
+namespace AccelDrum.Game.Accel;
 
-public class AccelDevice : IDisposable
+public class AccelCollection : IDisposable
 {
+    public bool Connected => serial.Connected;
+
     private string[] portNames = [];
     private SerialManager serial = new();
     private bool dataArrived = false;
     private SerialPacket<RawAccelPacket> latestAccelPacketNative;
-    private SimpleFixedSizeHistoryQueue<Vector3> rotHistory = new(250);
     private SimpleFixedSizeHistoryQueue<float> packetTimeHistory = new(250);
     private Stopwatch packetTimer = new();
     private SortedDictionary<PacketType, int> packetCounts = new();
@@ -32,35 +29,27 @@ public class AccelDevice : IDisposable
     private bool packetTimePlotHovered = false;
     private bool showPacketBytes = false;
     private bool showLatestAccelPacket = false;
-    private bool showRotHistory = false;
 
-    private Mesh meshTestCube = null!;
-    private MeshManager meshManager = null!;
-    private Vector3 velocity = new();
-    private FusionAhrs ahrs = null!;
-    private FusionOffset fusionOffset = null!;
+    private AccelPart[]? accelDevices = null;
+    private Timer2 accelPollTimer = new(750);
 
-    public AccelDevice(MeshManager meshManager)
+    public AccelCollection()
     {
-        this.meshManager = meshManager;
-
-        meshTestCube = meshManager.CreateMesh("testCube", meshManager.Shaders["main"]);
-
-        (meshTestCube.Vertices, meshTestCube.Indexes) = ShapeUtils.CubeWithTexture(1, 2, 1);
-        meshTestCube.Texture = meshManager.Textures["container"];
-        meshTestCube.Origin = new Vector3(0, 0, 1);
-        meshTestCube.Position = new Vector3(0, 2, 0);
-        DebugRenderer.Ins.SetMesh(meshTestCube);
     }
 
     public void Update()
     {
         serial.Update();
 
-        if (serial.Connected)
+        if (Connected)
+        {
+            if (accelPollTimer.CheckAndResetIfElapsed())
+            {
+                serial.SendPacket(PacketType.Configure, new ConfigurePacket(
+                    ConfigurePacket.Typ.PollForData, ConfigurePacket.Val.None));
+            }
             ReceivePackets();
-
-        rotHistory.Push(meshTestCube.Rotation);
+        }
     }
 
     private void ReceivePackets()
@@ -102,23 +91,11 @@ public class AccelDevice : IDisposable
 
     private void HandlePacketAccel(AccelPacket p)
     {
-        p = p with
-        {
-            Accel = ConvertAxes(p.Accel),
-            Gyro = ConvertAxes(p.Gyro),
-            GyroEuler = ConvertAxes(p.GyroEuler),
-        };
-        if (p.DeltaMicros <= 1_000_000)
-        {
-            meshTestCube.RotationQuat = p.Gyro;
-            float secs = p.DeltaMicros / 1_000_000.0f;
-            velocity += p.Accel * secs;
-            meshTestCube.Position += p.Accel * secs * secs * 10;
-        }
     }
 
     private void HandlePacketRawAccel(RawAccelPacket p)
     {
+        int i = 0;
         foreach (RawAccelPacket.Pack packNat in p.Packs)
         {
             var pack = packNat with
@@ -127,25 +104,11 @@ public class AccelDevice : IDisposable
                 Gyro = ConvertAxes(packNat.Gyro),
             };
             dataArrived = true;
-            //if (pack.DeltaMicros <= 1_000_000)
-            //{
-            //    meshTestCube.Rotation = pack.Gyro;
-            //    float secs = pack.DeltaMicros / 1_000_000.0f;
-            //    velocity += pack.Accel * secs;
-            //meshTestCube.Position += pack.Accel * secs * secs * 10;
-            //}
-            if (pack.DeltaMicros <= 1_000_000 / 100)
+            if (pack.DeltaMicros <= 1_000_000 / 100 * 2)
             {
-                var secsElapsed = pack.DeltaMicros / 1_000_000.0f;
-                var gyro = fusionOffset.Update(pack.Gyro.Interchange());
-                ahrs.UpdateNoMagnetometer(
-                    gyro,
-                    pack.Accel.Interchange(),
-                    secsElapsed);
-
-                meshTestCube.Position += ahrs.GetEarthAcceleration().Interchange() * secsElapsed * secsElapsed;
-                meshTestCube.RotationQuat = ahrs.Quaternion.Interchange();
+                accelDevices![i].PushData(pack);
             }
+            i++;
         }
     }
 
@@ -181,7 +144,13 @@ public class AccelDevice : IDisposable
 
     public void Draw()
     {
-        meshTestCube.Draw();
+        if (accelDevices is not null)
+        {
+            foreach (var dev in accelDevices)
+            {
+                dev.Draw();
+            }
+        }
     }
 
     private void Connect(string name)
@@ -194,9 +163,13 @@ public class AccelDevice : IDisposable
         packetTimeHistory.Clear();
         packetTimer.Restart();
 
-        ahrs = new FusionAhrs(new FusionAhrsSettings(
-            gyroscopeRange: 1000.0f));
-        fusionOffset = new(100);
+        accelDevices = new[]
+        {
+            new AccelPart(-3),
+            new AccelPart(-1),
+            new AccelPart(1),
+            new AccelPart(3),
+        };
     }
 
     private void Disconnect()
@@ -206,6 +179,10 @@ public class AccelDevice : IDisposable
         {
             serial.Disconnect();
         }
+
+        foreach (var dev in accelDevices!)
+            dev.Dispose(); // Dispose opengl buffers in the main thread
+        accelDevices = null;
     }
 
     public void SerialWindow()
@@ -224,14 +201,14 @@ public class AccelDevice : IDisposable
                     ImGui.Text(name);
                     ImGui.SameLine();
 
-                    if (serial.Connected && serial.PortName == name)
+                    if (Connected && serial.PortName == name)
                     {
                         if (ImGui.Button("Close"))
                             Disconnect();
                     }
                     else if (ImGui.Button("Connect"))
                     {
-                        if (serial.Connected)
+                        if (Connected)
                             Disconnect();
                         Connect(name);
                     }
@@ -239,50 +216,27 @@ public class AccelDevice : IDisposable
                 ImGui.EndTable();
             }
 
-            ImGui.AlignTextToFramePadding();
-            ImGui.Text("Reset");
-            ImGui.SameLine();
-            if (ImGui.Button("rotation"))
-                meshTestCube.Rotation = Vector3.Zero;
-            ImGui.SameLine();
-            if (ImGui.Button("position & velocity"))
+            if (Connected)
             {
-                meshTestCube.Position = new Vector3(0, 2, 0);
-                velocity = Vector3.Zero;
-            }
+                if (ImGui.Button("Reset all"))
+                {
+                    foreach (var dev in accelDevices!)
+                        dev.Reset();
+                }
 
-            ImGui.Text("Cube vel");
-            ImGui.SameLine();
-            if (ImGui.BeginTable("tableCubeVel", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-            {
-                for (int i = 0; i < 3; i++)
+                if (ImGui.BeginTabBar("tabbarDevices"))
                 {
-                    ImGui.TableNextColumn();
-                    ImGui.Text(velocity[i].ToString("n3"));
+                    int i = 0;
+                    foreach (var dev in accelDevices!)
+                    {
+                        if (ImGui.BeginTabItem((++i).ToString()))
+                        {
+                            dev.DebugGui();
+                            ImGui.EndTabItem();
+                        }
+                    }
+                    ImGui.EndTabBar();
                 }
-                ImGui.EndTable();
-            }
-            ImGui.Text("Cube rot");
-            ImGui.SameLine();
-            if (ImGui.BeginTable("tableCubeRot", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    ImGui.TableNextColumn();
-                    ImGui.Text(meshTestCube.Rotation[i].ToString("n2"));
-                }
-                ImGui.EndTable();
-            }
-            ImGui.Text("Cube pos");
-            ImGui.SameLine();
-            if (ImGui.BeginTable("tableCubePos", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-            {
-                for (int i = 0; i < 3; i++)
-                {
-                    ImGui.TableNextColumn();
-                    ImGui.Text(meshTestCube.Position[i].ToString("n3"));
-                }
-                ImGui.EndTable();
             }
 
             ImGui.Text("Packet counts");
@@ -312,7 +266,7 @@ public class AccelDevice : IDisposable
             }
             ImGui.Text(stringsFromAccelFull);
 
-            if (serial.Connected && dataArrived)
+            if (Connected && dataArrived)
             {
                 if (ImGui.Button("Backlight toggle"))
                 {
@@ -336,6 +290,8 @@ public class AccelDevice : IDisposable
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.ResetDmp, ConfigurePacket.Val.None));
+                    foreach (var dev in accelDevices!)
+                        dev.Reset();
                 }
 
                 ImGui.Checkbox("Packet delay", ref showPacketTime);
@@ -435,31 +391,6 @@ public class AccelDevice : IDisposable
                     }
                 }
             }
-
-            ImGui.Checkbox("Show rot history", ref showRotHistory);
-            if (showRotHistory)
-            {
-                System.Numerics.Vector2 size = new(-1, 50);
-                ImGui.PlotLines("x", ref rotHistory.Ref.X, rotHistory.Length, 0, null, -180, 180,
-                    size, rotHistory.ElementSize);
-                ImGui.PlotLines("y", ref rotHistory.Ref.Y, rotHistory.Length, 0, null, -180, 180,
-                    size, rotHistory.ElementSize);
-                ImGui.PlotLines("z", ref rotHistory.Ref.Z, rotHistory.Length, 0, null, -180, 180,
-                    size, rotHistory.ElementSize);
-            }
-
-            ImGui.End();
-        }
-
-        if (ImGui.Begin("Rot history"))
-        {
-            System.Numerics.Vector2 size = new(-1, (ImGui.GetContentRegionAvail().Y - ImGui.GetStyle().ItemInnerSpacing.Y * 2) / 3);
-            ImGui.PlotLines("x", ref rotHistory.Ref.X, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
-            ImGui.PlotLines("y", ref rotHistory.Ref.Y, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
-            ImGui.PlotLines("z", ref rotHistory.Ref.Z, rotHistory.Length, 0, null, -180, 180,
-                size, rotHistory.ElementSize);
             ImGui.End();
         }
     }
@@ -474,7 +405,7 @@ public class AccelDevice : IDisposable
         return new Vector3(v.Y, -v.X, v.Z);
     }
 
-    ~AccelDevice()
+    ~AccelCollection()
     {
         Dispose();
     }

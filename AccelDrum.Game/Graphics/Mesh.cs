@@ -202,16 +202,15 @@ public class Mesh : IDisposable
         Dispose();
     }
 
+    private bool disposed = false;
+
     public void Dispose()
     {
-        if (vbo != 0)
-            GL.DeleteBuffer(vbo);
-        vbo = 0;
-        if (vao != 0)
-            GL.DeleteVertexArray(vao);
-        vao = 0;
-        if (ebo != 0)
-            GL.DeleteBuffer(ebo);
-        ebo = 0;
+        if (disposed)
+            return;
+        GL.DeleteBuffer(vbo);
+        GL.DeleteVertexArray(vao);
+        GL.DeleteBuffer(ebo);
+        disposed = true;
     }
 }

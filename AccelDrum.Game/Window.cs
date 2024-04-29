@@ -1,4 +1,5 @@
-﻿using AccelDrum.Game.Extensions;
+﻿using AccelDrum.Game.Accel;
+using AccelDrum.Game.Extensions;
 using AccelDrum.Game.Graphics;
 using AccelDrum.Game.Graphics.Shaders;
 using AccelDrum.Game.Graphics.Textures;
@@ -31,10 +32,9 @@ public class Window : GameWindow
     private float ambientStrength = 0.5f;
     private Stopwatch gameTimer = Stopwatch.StartNew();
     private bool demoWindow = false;
-    private AccelDevice accel = null!;
+    private AccelCollection accel = null!;
     private SimpleFixedSizeHistoryQueue<float> frametimeHistory = new(500);
 
-    private MeshManager meshManager = new();
     private Shader shaderMain = null!;
     private Shader shaderGround = null!;
     private Uniform<Matrix4> uniformView = null!;
@@ -66,6 +66,9 @@ public class Window : GameWindow
         changeWindowTitle();
         GL.ClearColor(0.2f, 0.3f, 0.3f, 1.0f);
 
+        MeshManager.Init();
+        MeshManager meshManager = MeshManager.Ins;
+
         shaderMain = meshManager.CreateShader("main", "Graphics/Shaders/main.vert", "Graphics/Shaders/main.frag");
         shaderGround = meshManager.CreateShader("ground", "Graphics/Shaders/ground.vert", "Graphics/Shaders/ground.frag");
 
@@ -80,7 +83,7 @@ public class Window : GameWindow
         uniformAmbientStrength = meshManager.CreateGlobalUniform<float>("ambientStrength");
         uniformTime = meshManager.CreateGlobalUniform<float>("time");
 
-        DebugRenderer.Init(meshManager, meshDebug);
+        DebugRenderer.Init(meshDebug);
 
         const float groundSizeHalf = 10;
         meshGround.Vertices.AddRange(ShapeUtils.Quad(
@@ -106,7 +109,7 @@ public class Window : GameWindow
         this.VSync = VSyncMode.On;
         //this.UpdateFrequency = 70.0;
 
-        accel = new AccelDevice(meshManager);
+        accel = new AccelCollection();
         DebugRenderer.Ins.AddAllMeshes();
     }
 
@@ -404,7 +407,7 @@ public class Window : GameWindow
                 _controller,
                 accel,
                 DebugRenderer.Ins,
-                meshManager,
+                MeshManager.Ins,
             })
             {
                 disposable?.Dispose();
