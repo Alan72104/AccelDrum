@@ -81,9 +81,12 @@ bool Display::bufPrintf(char buf[bufRows][bufCols], uint32_t col, uint32_t row, 
 {
     if (row >= rows || col >= cols)
         return false;
-    uint32_t bufSizeAvail = cols + 1 - col;
-    uint32_t fullLen = std::vsnprintf(buf[row] + col, bufSizeAvail, s, args);
-    return fullLen >= 0 && fullLen < bufSizeAvail;
+    uint32_t printBufSize = cols - col + 1;
+    char printBuf[printBufSize] = {0};
+    int32_t fullLen = vsnprintf(printBuf, printBufSize, s, args);
+    // Don't print directly to avoid writing the terminating null
+    memcpy(buf[row] + col, printBuf, min(fullLen, (int32_t)printBufSize - 1) * sizeof(char));
+    return fullLen >= 0 && fullLen < printBufSize;
 }
 
 bool Display::printf(uint32_t col, uint32_t row, const char* s, ...)
