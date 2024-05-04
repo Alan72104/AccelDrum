@@ -7,6 +7,7 @@ public class MatrixPrinter(int initialRows = 1, int initialColumns = 1)
 {
     public string Separator { get; init; } = ", ";
     public bool Align { get; init; } = true;
+
     /// <summary>
     /// Backing matrix is row major, use <c>[y, x]</c> or <c>[row, column]</c> to access element
     /// </summary>
@@ -25,9 +26,10 @@ public class MatrixPrinter(int initialRows = 1, int initialColumns = 1)
         int rows = matrix.GetLength(0);
         int cols = matrix.GetLength(1);
 
-        int[]? columnWidths = Align ? new int[cols] : null;
+        int[]? columnWidths = null;
         if (Align)
         {
+            columnWidths = new int[cols];
             for (int x = 0; x < cols; x++)
             {
                 int maxWidth = 0;

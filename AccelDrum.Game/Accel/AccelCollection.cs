@@ -27,11 +27,13 @@ public class AccelCollection : IDisposable
     private List<byte> sbFromAccel = new();
     private bool showPacketTime = true;
     private bool packetTimePlotHovered = false;
+    private bool showAccelSettings = false;
     private bool showPacketBytes = false;
     private bool showLatestAccelPacket = false;
 
     private AccelPart[]? accelDevices = null;
     private Timer2 accelPollTimer = new(750);
+    private AccelSettings? accelSettings = null;
 
     public AccelCollection()
     {
@@ -77,11 +79,8 @@ public class AccelCollection : IDisposable
                     HandlePacketText(native.GetInnerAs<TextPacket>());
                     break;
                 case PacketType.Configure:
-                    {
-                        ConfigurePacket p = native.GetInnerAs<ConfigurePacket>();
-                        Log.Information($"Received config packet: {p.Value}");
-                        break;
-                    }
+                    HandlePacketConfigure(native.GetInnerAs<ConfigurePacket>());
+                    break;
                 default:
                     Log.Warning($"Unknown packet type {native.Type}");
                     break;
@@ -100,15 +99,25 @@ public class AccelCollection : IDisposable
         {
             var pack = packNat with
             {
-                Accel = ConvertAxes(packNat.Accel),
-                Gyro = ConvertAxes(packNat.Gyro),
+                Accel = ConvertAxesv(packNat.Accel),
+                Gyro = ConvertAxesv(packNat.Gyro),
             };
             dataArrived = true;
             if (pack.DeltaMicros <= 1_000_000 / 100 * 2)
             {
-                accelDevices![i].PushData(pack);
+                accelDevices![i].PushData(pack.DeltaMicros / 1_000_000.0f, pack.Accel, pack.Gyro);
             }
             i++;
+        }
+
+        static Quaternion ConvertAxes(Quaternion q)
+        {
+            return new Quaternion(q.Y, -q.Z, -q.X, -q.W).Normalized();
+        }
+
+        static Vector3 ConvertAxesv(Vector3 v)
+        {
+            return new Vector3(v.Y, -v.X, v.Z);
         }
     }
 
@@ -142,6 +151,31 @@ public class AccelCollection : IDisposable
         }
     }
 
+    private void HandlePacketConfigure(ConfigurePacket p)
+    {
+        if (p.Type == ConfigurePacket.Typ.Reset &&
+            p.Value == ConfigurePacket.Val.ResetResultSettings)
+        {
+            var settings = p.GetDataAs<ConfigurePacket.Settings>();
+            var a1 = new Vector3i[4];
+            var a2 = new Vector3i[4];
+            for (int i = 0; i < 4; i++)
+            {
+                a1[i] = new Vector3i(settings.AccelFactoryTrims[i],
+                    settings.AccelFactoryTrims[i + 1], settings.AccelFactoryTrims[i + 2]);
+                a2[i] = new Vector3i(settings.GyroFactoryTrims[i],
+                    settings.GyroFactoryTrims[i + 1], settings.GyroFactoryTrims[i + 2]);
+            }
+            accelSettings = new()
+            {
+                AccelRange = (AccelFullScale)settings.AccelRange,
+                GyroRange = (GyroFullScale)settings.GyroRange,
+                AccelFactoryTrims = a1,
+                GyroFactoryTrims = a2,
+            };
+        }
+    }
+
     public void Draw()
     {
         if (accelDevices is not null)
@@ -163,6 +197,9 @@ public class AccelCollection : IDisposable
         packetTimeHistory.Clear();
         packetTimer.Restart();
 
+        serial.SendPacket(PacketType.Configure, new ConfigurePacket(
+            ConfigurePacket.Typ.Reset, ConfigurePacket.Val.None)); // Retrieve the settings at start
+
         accelDevices = new[]
         {
             new AccelPart(-3),
@@ -181,15 +218,17 @@ public class AccelCollection : IDisposable
         }
 
         foreach (var dev in accelDevices!)
-            dev.Dispose(); // Dispose opengl buffers in the main thread
+            dev.Dispose(); // Dispose OpenGL buffers in the main thread
         accelDevices = null;
+        accelSettings = null;
+        dataArrived = false;
     }
 
     public void SerialWindow()
     {
-        if (ImGui.Begin("Serial"))
+        if (ImGui.Begin("serial"))
         {
-            if (ImGui.Button("Get port names"))
+            if (ImGui.Button("get port names"))
                 portNames = serial.GetPortNames();
             ImGui.SameLine();
             if (ImGui.BeginTable("tablePorts", 1, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
@@ -203,10 +242,10 @@ public class AccelCollection : IDisposable
 
                     if (Connected && serial.PortName == name)
                     {
-                        if (ImGui.Button("Close"))
+                        if (ImGui.Button("close"))
                             Disconnect();
                     }
-                    else if (ImGui.Button("Connect"))
+                    else if (ImGui.Button("connect"))
                     {
                         if (Connected)
                             Disconnect();
@@ -218,13 +257,13 @@ public class AccelCollection : IDisposable
 
             if (Connected)
             {
-                if (ImGui.Button("Reset all"))
+                if (ImGui.Button("reset all"))
                 {
                     foreach (var dev in accelDevices!)
                         dev.Reset();
                 }
 
-                if (ImGui.BeginTabBar("tabbarDevices"))
+                if (ImGui.BeginTabBar("tabBarDevices"))
                 {
                     int i = 0;
                     foreach (var dev in accelDevices!)
@@ -236,10 +275,11 @@ public class AccelCollection : IDisposable
                         }
                     }
                     ImGui.EndTabBar();
+                    ImGui.Separator();
                 }
             }
 
-            ImGui.Text("Packet counts");
+            ImGui.Text("packet counts");
             ImGui.SameLine();
             if (ImGui.BeginTable("tablePacketCount", 2, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
             {
@@ -253,48 +293,66 @@ public class AccelCollection : IDisposable
                 ImGui.EndTable();
             }
 
-            ImGui.Text($"Corrupted count: {serial.CorruptedPacketCount}");
-
-
-            ImGui.AlignTextToFramePadding();
-            ImGui.Text("Strings from accel");
-            ImGui.SameLine();
-            if (ImGui.Button("Clear"))
-            {
-                stringsFromAccel.Clear();
-                stringsFromAccelFull = "";
-            }
-            ImGui.Text(stringsFromAccelFull);
+            ImGui.Text($"corrupted count: {serial.CorruptedPacketCount}");
 
             if (Connected && dataArrived)
             {
-                if (ImGui.Button("Backlight toggle"))
+                if (ImGui.Button("backlight toggle"))
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.Backlight, ConfigurePacket.Val.BacklightSetToggle));
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("On"))
+                if (ImGui.Button("on"))
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.Backlight, ConfigurePacket.Val.BacklightSetOn));
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("Off"))
+                if (ImGui.Button("off"))
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
                         ConfigurePacket.Typ.Backlight, ConfigurePacket.Val.BacklightSetOff));
                 }
                 ImGui.SameLine();
-                if (ImGui.Button("Reset dmp"))
+                if (ImGui.Button("reset"))
                 {
                     serial.SendPacket(PacketType.Configure, new ConfigurePacket(
-                        ConfigurePacket.Typ.ResetDmp, ConfigurePacket.Val.None));
+                        ConfigurePacket.Typ.Reset, ConfigurePacket.Val.None));
                     foreach (var dev in accelDevices!)
                         dev.Reset();
                 }
 
-                ImGui.Checkbox("Packet delay", ref showPacketTime);
+                ImGui.AlignTextToFramePadding();
+                ImGui.Text("strings from accel");
+                ImGui.SameLine();
+                if (ImGui.Button("clear"))
+                {
+                    stringsFromAccel.Clear();
+                    stringsFromAccelFull = "";
+                }
+                ImGui.Text(stringsFromAccelFull);
+
+                ImGui.Checkbox("accel settings", ref showAccelSettings);
+                if (showAccelSettings && accelSettings is not null)
+                {
+                    ImGui.Indent();
+                    ImGui.Text($"accel range: {accelSettings.AccelRange}");
+                    ImGui.Text($"gyro range: {accelSettings.GyroRange}");
+                    ImGui.Text($"accel factory trims:");
+                    ImGui.Indent();
+                    foreach (Vector3i v in accelSettings.AccelFactoryTrims)
+                        ImGui.Text(v.ToString());
+                    ImGui.Unindent();
+                    ImGui.Text($"gyro factory trims:");
+                    ImGui.Indent();
+                    foreach (Vector3i v in accelSettings.GyroFactoryTrims)
+                        ImGui.Text(v.ToString());
+                    ImGui.Unindent();
+                    ImGui.Unindent();
+                }
+
+                ImGui.Checkbox("packet delay", ref showPacketTime);
                 if (showPacketTime)
                 {
                     ImGui.PlotLines("##packetDelay", ref packetTimeHistory.Ref, packetTimeHistory.Length, 0, null, 0, 100,
@@ -302,7 +360,7 @@ public class AccelCollection : IDisposable
                     packetTimePlotHovered = ImGui.IsItemHovered();
                 }
 
-                ImGui.Checkbox("Show bytes", ref showPacketBytes);
+                ImGui.Checkbox("show bytes", ref showPacketBytes);
                 if (showPacketBytes)
                 {
                     if (ImGui.BeginTable("tablePacketBytes", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
@@ -319,7 +377,7 @@ public class AccelCollection : IDisposable
                     }
                 }
 
-                ImGui.Checkbox("Show latest accel packet", ref showLatestAccelPacket);
+                ImGui.Checkbox("show latest accel packet", ref showLatestAccelPacket);
                 if (showLatestAccelPacket)
                 {
                     RawAccelPacket.Pack accel = latestAccelPacketNative.Inner.Packs[0];
@@ -330,7 +388,7 @@ public class AccelCollection : IDisposable
 
                         ImGui.TableNextColumn();
                         ImGui.SetNextItemWidth(4);
-                        ImGui.Text("Delta us");
+                        ImGui.Text("delta us");
                         ImGui.TableNextColumn();
                         ImGui.Text(accel.DeltaMicros.ToString());
 
@@ -379,12 +437,12 @@ public class AccelCollection : IDisposable
                         }
 
                         ImGui.TableNextColumn();
-                        ImGui.Text("Crc32");
+                        ImGui.Text("crc32");
                         ImGui.TableNextColumn();
                         ImGui.Text($"0x{latestAccelPacketNative.Crc32:X}");
 
                         ImGui.TableNextColumn();
-                        ImGui.Text("Magic");
+                        ImGui.Text("magic");
                         ImGui.TableNextColumn();
                         ImGui.Text($"0x{latestAccelPacketNative.Magic:X}");
                         ImGui.EndTable();
@@ -393,16 +451,6 @@ public class AccelCollection : IDisposable
             }
             ImGui.End();
         }
-    }
-
-    private static Quaternion ConvertAxes(Quaternion q)
-    {
-        return new Quaternion(q.Y, -q.Z, -q.X, -q.W).Normalized();
-    }
-
-    private static Vector3 ConvertAxes(Vector3 v)
-    {
-        return new Vector3(v.Y, -v.X, v.Z);
     }
 
     ~AccelCollection()

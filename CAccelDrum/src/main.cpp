@@ -61,7 +61,6 @@ void setup() {
     display.update();
     for (MPU6050 &mpu : mpus)
         mpu.initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
-    // pinMode(interruptPin, INPUT);
 
     display.clear();
     display.printf(0, 0, "Mpu set offset");
@@ -96,7 +95,7 @@ void setup() {
         vTaskDelete(nullptr);
     };
     TaskHandle_t task;
-    xTaskCreatePinnedToCore(doOtherHalf, "NAME", 2048, nullptr, tskIDLE_PRIORITY, &task, 0);
+    xTaskCreatePinnedToCore(doOtherHalf, "Mpu calibration", 2048, nullptr, 10, &task, 0);
     calibrate(0);
     calibrate(1);
     while (!otherHalfDone)
@@ -247,27 +246,38 @@ static void handleConfigurePacket(ConfigurePacket& packet)
                     break;
             }
             break;
-        case ConfigurePacket::Type::ResetDmp:
+        case ConfigurePacket::Type::Reset:
         {
-            mpus[0].resetDMP();
-            mpus[0].resetFIFO();
-            mpus[0].resetSensors();
-            mpus[0].initialize(ACCEL_FS::A8G, GYRO_FS::G1000DPS);
-            mpus[0].CalibrateAccel(6);
-            mpus[0].CalibrateGyro(6);
+            std::array<uint8_t, 12> accelTrims;
+            std::array<uint8_t, 12> gyroTrims;
+            for (uint32_t i = 0; i < 4; i++)
+            {
+                accelTrims[i * 3 + 0] = mpus[i].getAccelXSelfTestFactoryTrim();
+                accelTrims[i * 3 + 1] = mpus[i].getAccelYSelfTestFactoryTrim();
+                accelTrims[i * 3 + 2] = mpus[i].getAccelZSelfTestFactoryTrim();
+                gyroTrims[i * 3 + 0] = mpus[i].getGyroXSelfTestFactoryTrim();
+                gyroTrims[i * 3 + 1] = mpus[i].getGyroYSelfTestFactoryTrim();
+                gyroTrims[i * 3 + 2] = mpus[i].getGyroZSelfTestFactoryTrim();
+            }
+            
+            ConfigurePacket packet =
+            {
+                ConfigurePacket::Type::Reset,
+                ConfigurePacket::Val::ResetResultSettings
+            };
 
+            PacketUtils::getConfigureDataAs<ConfigurePacket::Settings>(packet.data) =
+            {
+                .accelRange = mpus[0].getFullScaleAccelRange(),
+                .gyroRange = mpus[0].getFullScaleGyroRange(),
+                .accelFactoryTrims = accelTrims,
+                .gyroFactoryTrims = gyroTrims
+            };
+            
             PacketUtils::sendConfigureAck(
-                ConfigurePacket::Type::ResetDmp,
-                ConfigurePacket::Val::ResetDmpAck);
-            mpus[0].getFullScaleAccelRange();
-            mpus[0].getFullScaleGyroRange();
-            mpus[0].getGyroXSelfTestFactoryTrim();
-            mpus[0].getGyroYSelfTestFactoryTrim();
-            mpus[0].getGyroZSelfTestFactoryTrim();
-            mpus[0].getAccelXSelfTestFactoryTrim();
-            mpus[0].getAccelYSelfTestFactoryTrim();
-            mpus[0].getAccelZSelfTestFactoryTrim();
-            int16_t * offsets = mpus[0].GetActiveOffsets();
+                ConfigurePacket::Type::Reset,
+                ConfigurePacket::Val::ResetAck);
+            PacketUtils::send(PacketType::Configure, packet);
             break;
         }
     }

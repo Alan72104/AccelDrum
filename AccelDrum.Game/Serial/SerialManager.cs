@@ -34,7 +34,6 @@ public class SerialManager : IDisposable
         {
             throw new NotSupportedException($"Packet size was modified {SerialPacket.SizeExpected} => {SerialPacket.Size}");
         }
-        //serial.DataReceived += OnSerialDataReceived;
         serial.ErrorReceived += OnSerialErrorReceived;
     }
 
@@ -127,7 +126,7 @@ public class SerialManager : IDisposable
         }
         catch (Exception e)
         {
-            Log.Warning($"{e.Message} in {nameof(OnSerialDataReceived)}", e);
+            Log.Warning($"{nameof(OnSerialDataReceived)}: {e.Message}", e);
         }
     }
 

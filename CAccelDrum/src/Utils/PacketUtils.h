@@ -23,17 +23,30 @@ namespace PacketUtils
     }
 
     template <typename T>
-    requires (sizeof(T) == sizeof(SerialPacket::Inner))
-    inline void send(PacketType type, T& packet)
+        requires(sizeof(T) == sizeof(SerialPacket::Inner))
+    inline void send(PacketType type, T &packet)
     {
         serial.send(type, &packet, sizeof(T));
     }
 
     template <typename T>
-    requires (sizeof(T) == sizeof(SerialPacket::Inner))
-    inline void send(PacketType type, T&& packet)
+        requires(sizeof(T) == sizeof(SerialPacket::Inner))
+    inline void send(PacketType type, T &&packet)
     {
         serial.send(type, &packet, sizeof(T));
+    }
+
+    template <typename TFrom, typename TTo>
+        requires(sizeof(TFrom) >= sizeof(TTo))
+    inline TTo &reinterpNarrowing(TFrom &obj)
+    {
+        return *reinterpret_cast<TTo *>(&obj);
+    }
+    
+    template <typename TTo>
+    inline TTo &getConfigureDataAs(ConfigurePacket::Data &from)
+    {
+        return reinterpNarrowing<ConfigurePacket::Data, TTo>(from);
     }
 
     std::string getBytesHex(SerialPacket& packet, uint32_t groupSize = 8, uint32_t groupsPerLine = 4);

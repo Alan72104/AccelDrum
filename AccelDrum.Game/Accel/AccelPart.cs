@@ -16,6 +16,7 @@ public class AccelPart : IDisposable
     private FusionAhrs fusion = null!;
     private FusionOffset fusionOffset = null!;
     private bool showRotHistory = false;
+    private Vector3 initialPos;
 
     public AccelPart(int x)
     {
@@ -26,7 +27,7 @@ public class AccelPart : IDisposable
         (meshTestCube.Vertices, meshTestCube.Indexes) = ShapeUtils.CubeWithTexture(1, 2, 1);
         meshTestCube.Texture = meshManager.Textures["container"];
         meshTestCube.Origin = new Vector3(0, 0, 1);
-        meshTestCube.Position = new Vector3(x, 2, 0);
+        meshTestCube.Position = initialPos = new Vector3(x, 2, 0);
 
         Reset();
     }
@@ -34,8 +35,10 @@ public class AccelPart : IDisposable
     public void Reset()
     {
         fusion = new FusionAhrs(new FusionAhrsSettings(
-            gyroscopeRange: 1000.0f));
+            gyroscopeRange: 1000.0f
+        ));
         fusionOffset = new(100);
+        meshTestCube.Position = initialPos;
     }
 
     public void Update()
@@ -48,13 +51,12 @@ public class AccelPart : IDisposable
         meshTestCube.Draw();
     }
 
-    public void PushData(RawAccelPacket.Pack pack)
+    public void PushData(float secsElapsed, Vector3 accel, Vector3 gyro)
     {
-        var secsElapsed = pack.DeltaMicros / 1_000_000.0f;
-        var gyro = fusionOffset.Update(pack.Gyro.Interchange());
+        gyro = fusionOffset.Update(gyro.Interchange()).Interchange();
         fusion.UpdateNoMagnetometer(
-            gyro,
-            pack.Accel.Interchange(),
+            gyro.Interchange(),
+            accel.Interchange(),
             secsElapsed);
 
         meshTestCube.Position += fusion.GetEarthAcceleration().Interchange() * secsElapsed * secsElapsed;
@@ -63,7 +65,7 @@ public class AccelPart : IDisposable
 
     public void DebugGui()
     {
-        ImGui.Text("Cube vel");
+        ImGui.Text("cube vel");
         ImGui.SameLine();
         if (ImGui.BeginTable("tableCubeVel", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
@@ -74,7 +76,7 @@ public class AccelPart : IDisposable
             }
             ImGui.EndTable();
         }
-        ImGui.Text("Cube rot");
+        ImGui.Text("cube rot");
         ImGui.SameLine();
         if (ImGui.BeginTable("tableCubeRot", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
@@ -85,7 +87,7 @@ public class AccelPart : IDisposable
             }
             ImGui.EndTable();
         }
-        ImGui.Text("Cube pos");
+        ImGui.Text("cube pos");
         ImGui.SameLine();
         if (ImGui.BeginTable("tableCubePos", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
@@ -97,7 +99,7 @@ public class AccelPart : IDisposable
             ImGui.EndTable();
         }
 
-        ImGui.Checkbox("Show rot history", ref showRotHistory);
+        ImGui.Checkbox("show rot history", ref showRotHistory);
         if (showRotHistory)
         {
             System.Numerics.Vector2 size = new(-1, 50);

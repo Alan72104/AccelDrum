@@ -1,5 +1,6 @@
 ﻿using AccelDrum.Game.Serial;
 using OpenTK.Mathematics;
+using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -66,7 +67,7 @@ public struct ConfigurePacket
         None,
         PollForData,
         Backlight,
-        ResetDmp,
+        Reset,
         Count
     }
     public enum Val
@@ -79,8 +80,20 @@ public struct ConfigurePacket
         BacklightSetOn,
         BacklightSetOff,
         BacklightSetToggle,
-        ResetDmpAck
+        ResetAck,
+        ResetResultSettings,
     }
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    public struct Settings
+    {
+        public byte AccelRange;
+        public byte GyroRange;
+        public ByteArray AccelFactoryTrims;
+        public ByteArray GyroFactoryTrims;
+
+        [InlineArray(12)]
+        public struct ByteArray { private byte element0; }
+    };
 
     public Typ Type;
     public Val Value;
@@ -90,6 +103,14 @@ public struct ConfigurePacket
     {
         Type = type;
         Value = value;
+    }
+
+    public unsafe ref T GetDataAs<T>() where T : struct
+    {
+        if (Unsafe.SizeOf<T>() > Unsafe.SizeOf<ExtraData>())
+            throw new InvalidOperationException($"Size to cast to should be equal to or less than ConfigurePacket.ExtraData");
+        fixed (ExtraData* ptr = &Data)
+            return ref Unsafe.AsRef<T>(ptr); // Super unsafe workaround for referencing self (ref Data)
     }
 
     [InlineArray(SerialPacket.SizeInner - sizeof(Typ) - sizeof(Val))]

@@ -77,7 +77,7 @@ struct ConfigurePacket
         None,
         PollForData,
         Backlight,
-        ResetDmp,
+        Reset,
         Count
     };
     enum class Val : int32_t
@@ -90,16 +90,19 @@ struct ConfigurePacket
         BacklightSetOn,
         BacklightSetOff,
         BacklightSetToggle,
-        ResetDmpAck
+        ResetAck,
+        ResetResultSettings,
     };
     struct Settings
     {
         uint8_t accelRange;
         uint8_t gyroRange;
-        uint8_t accel;
+        std::array<uint8_t, 12> accelFactoryTrims;
+        std::array<uint8_t, 12> gyroFactoryTrims;
     } __attribute__((packed));
     static constexpr size_t sizeData = SerialPacket::sizeInner - sizeof(Type) - sizeof(Val);
+    typedef std::array<byte, sizeData> Data;
     Type type;
     Val value;
-    std::array<byte, sizeData> data;
+    Data data;
 } __attribute__((packed));

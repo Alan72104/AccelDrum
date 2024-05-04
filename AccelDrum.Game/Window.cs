@@ -26,14 +26,14 @@ public class Window : GameWindow
     private Vector2 _lastMousePos;
     private float hue = 0.0f;
     private double lastFps = 0.0;
-    private double lastFrametime = 0.0;
-    private bool vsync = true;
+    private double lastFrameTime = 0.0;
+    private bool vSync = true;
     private Vector3 ambientColor = new(1);
     private float ambientStrength = 0.5f;
     private Stopwatch gameTimer = Stopwatch.StartNew();
     private bool demoWindow = false;
     private AccelCollection accel = null!;
-    private SimpleFixedSizeHistoryQueue<float> frametimeHistory = new(500);
+    private SimpleFixedSizeHistoryQueue<float> frameTimeHistory = new(500);
 
     private Shader shaderMain = null!;
     private Shader shaderGround = null!;
@@ -117,7 +117,7 @@ public class Window : GameWindow
     {
         base.OnResize(e);
 
-        // Update the opengl viewport
+        // Update the OpenGL viewport
         Vector2i fb = FramebufferSize;
         GL.Viewport(0, 0, fb.X, fb.Y);
 
@@ -186,11 +186,11 @@ public class Window : GameWindow
         const double weight = 0.05;
 
         lastFps = lastFps * (1 - weight) + (1 / this.UpdateTime) * weight;
-        lastFrametime = lastFrametime * (1 - weight) + this.UpdateTime * weight;
+        lastFrameTime = lastFrameTime * (1 - weight) + this.UpdateTime * weight;
 
         accel.Update();
 
-        frametimeHistory.Push((float)this.UpdateTime * 1000);
+        frameTimeHistory.Push((float)this.UpdateTime * 1000);
     }
 
     private void UpdateGui(FrameEventArgs e)
@@ -205,37 +205,30 @@ public class Window : GameWindow
 
     private void MainWindow()
     {
-        if (ImGui.Begin("Main"))
+        if (ImGui.Begin("main"))
         {
             //ImGui.AlignTextToFramePadding();
-            ImGui.Text($"Frametime: {lastFrametime * 1000:n2}ms");
+            ImGui.Text($"frame time: {lastFrameTime * 1000:n2}ms");
             ImGui.SameLine(200);
-            ImGui.Text($"Fps: {lastFps:n1}");
+            ImGui.Text($"fps: {lastFps:n1}");
             ImGui.SameLine(300);
-            ImGui.Checkbox("Vsync", ref vsync);
-            this.VSync = vsync ? VSyncMode.On : VSyncMode.Off;
+            ImGui.Checkbox("vsync", ref vSync);
+            this.VSync = vSync ? VSyncMode.On : VSyncMode.Off;
 
-            ImGui.ColorEdit3("Triangle color", ref _color.InterchangeRef());
-            var pos = _camera.Position; ImGui.DragFloat3("Pos", ref pos.InterchangeRef()); _camera.Position = pos;
+            ImGui.ColorEdit3("triangle color", ref _color.InterchangeRef());
+            var pos = _camera.Position; ImGui.DragFloat3("pos", ref pos.InterchangeRef()); _camera.Position = pos;
             ImGui.SameLine();
-            if (ImGui.Button("Reset"))
+            if (ImGui.Button("reset"))
                 _camera.Position = new Vector3(0, 2, 2);
-            ImGuiRotation("Rotation");
-            //var yaw = _camera.Yaw; ImGui.DragFloat("Yaw", ref yaw, 0.5f); _camera.Yaw = yaw;
-            //ImGui.SameLine();
-            ImGui.PushID(1);
-            //if (ImGui.Button("Reset"))
-            //(_camera.Yaw, _camera.Pitch) = VectorUtils.ToYawPitch(_camera.Position, Vector3.Zero);
-            ImGui.PopID();
-            //var pitch = _camera.Pitch; ImGui.DragFloat("Pitch", ref pitch, 0.5f); _camera.Pitch = pitch;
-            ImGui.ColorEdit3("Ambient color", ref ambientColor.InterchangeRef());
-            ImGui.DragFloat("Ambient strength", ref ambientStrength, 0.005f, 0, 1);
-            if (ImGui.Button("Clear"))
+            ImGuiRotation("rotation");
+            ImGui.ColorEdit3("ambient color", ref ambientColor.InterchangeRef());
+            ImGui.DragFloat("ambient strength", ref ambientStrength, 0.005f, 0, 1);
+            if (ImGui.Button("clear"))
             {
                 meshMain.Vertices.Clear();
                 meshCubes.Clear();
             }
-            if (ImGui.Button("Spawn random"))
+            if (ImGui.Button("spawn random"))
             {
                 foreach (var _ in Enumerable.Range(0, 5))
                 {
@@ -258,18 +251,11 @@ public class Window : GameWindow
                     meshMain.Texture = textureContainer;
                 }
             }
-            if (ImGui.Button("Spawn cube"))
-            {
-                //var (v, i) = ShapeUtils.CubeWithTexture(1);
-                //meshCubes.Vertices.AddRange(ShapeUtils.Transform(v, Matrix4.CreateTranslation(new Vector3(0, 0.5f, 0))));
-                //meshCubes.Indexes.AddRange(i);
-                //meshCubes.Texture = textureCea7d4517decdf202278d1cdbab9a1f5c088401ed86df5110dc37976c19e3116;
-            }
             {
                 System.Numerics.Vector2 size = new(-1, 50);
-                ImGui.PlotLines("frametime", ref frametimeHistory.Ref, frametimeHistory.Length,
+                ImGui.PlotLines("frame time", ref frameTimeHistory.Ref, frameTimeHistory.Length,
                     0, null, 0, 1000.0f / 30,
-                    size, frametimeHistory.ElementSize);
+                    size, frameTimeHistory.ElementSize);
             }
             ImGui.End();
         }
@@ -328,7 +314,7 @@ public class Window : GameWindow
         ImGui.AlignTextToFramePadding();
         ImGui.SameLine();
         ImGui.SetNextItemWidth(100);
-        if (ImGui.Button("Reset"))
+        if (ImGui.Button("reset"))
         {
             _camera.Rotation = new Vector3(0, -90, 0);
         }
@@ -393,7 +379,7 @@ public class Window : GameWindow
         int scaleFactorX = fb.X / ClientSize.X;
         int scaleFactorY = fb.Y / ClientSize.Y;
 
-        // Instanciate the ImGuiController with the right Scale Factor
+        // Instantiate the ImGuiController with the right Scale Factor
         _controller = new ImGuiController(ClientSize.X, ClientSize.Y, scaleFactorX, scaleFactorY);
     }
 

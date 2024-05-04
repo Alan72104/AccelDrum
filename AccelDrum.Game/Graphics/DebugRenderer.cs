@@ -69,15 +69,15 @@ public class DebugRenderer : IDisposable
 
     public void DebugWindow()
     {
-        Begin("Debug");
+        Begin("debug");
 
-        if (CollapsingHeader("Global uniforms"))
+        if (CollapsingHeader("global uniforms"))
         {
             if (BeginTable("tableUniforms", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
             {
-                TableSetupColumn("Type");
-                TableSetupColumn("Name");
-                TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+                TableSetupColumn("type");
+                TableSetupColumn("name");
+                TableSetupColumn("value", ImGuiTableColumnFlags.WidthStretch);
                 TableHeadersRow();
 
                 int tableId = 0;
@@ -139,7 +139,7 @@ public class DebugRenderer : IDisposable
         }
 
         AlignTextToFramePadding();
-        Text("Mesh:"); SameLine();
+        Text("mesh:"); SameLine();
         SetNextItemWidth(250);
         selectedMeshIndex += 1;
         if (Combo("##dropdown", ref selectedMeshIndex, meshNames, meshNames.Length))
@@ -158,28 +158,28 @@ public class DebugRenderer : IDisposable
             {
                 string shaderPath = $"{Path.GetFileName(mesh.Shader.VertPath)}, {Path.GetFileName(mesh.Shader.FragPath)}";
 
-                TableNextColumn(); Text($"Vertices: {mesh.Vertices.Count}");
-                TableNextColumn(); Text($"Indexes: {mesh.Indexes.Count}");
+                TableNextColumn(); Text($"vertices: {mesh.Vertices.Count}");
+                TableNextColumn(); Text($"indexes: {mesh.Indexes.Count}");
 
                 TableNextColumn(); AlignTextToFramePadding();
-                Text($"Position:"); SameLine(); DragMeshVec3("##pos", mesh, ref mesh.PositionRef, 0.1f);
-                TableNextColumn(); Text($"Origin:"); SameLine(); DragMeshVec3("##origin", mesh, ref mesh.OriginRef, 0.1f);
+                Text($"position:"); SameLine(); DragMeshVec3("##pos", mesh, ref mesh.PositionRef, 0.1f);
+                TableNextColumn(); Text($"origin:"); SameLine(); DragMeshVec3("##origin", mesh, ref mesh.OriginRef, 0.1f);
 
                 TableNextColumn(); AlignTextToFramePadding();
-                Text($"Rotation:"); SameLine(); DragEuler("##rot", mesh);
-                TableNextColumn(); Text($"Texture: {Path.GetFileName(mesh.Texture?.Path) ?? "null"}");
+                Text($"rotation:"); SameLine(); DragEuler("##rot", mesh);
+                TableNextColumn(); Text($"texture: {Path.GetFileName(mesh.Texture?.Path) ?? "null"}");
 
-                TableNextColumn(); Text($"Shader: {Path.GetFileName(mesh.Shader.VertPath)}");
-                TableNextColumn(); Text($"Shader: {Path.GetFileName(mesh.Shader.FragPath)}");
+                TableNextColumn(); Text($"shader: {Path.GetFileName(mesh.Shader.VertPath)}");
+                TableNextColumn(); Text($"shader: {Path.GetFileName(mesh.Shader.FragPath)}");
                 EndTable();
             }
 
             if (BeginTable("tableVertices", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))// | ImGuiTableFlags.ScrollY))
             {
-                TableSetupColumn("Pos", ImGuiTableColumnFlags.WidthStretch);
-                TableSetupColumn("Color", ImGuiTableColumnFlags.WidthStretch);
-                TableSetupColumn("Tex");
-                TableSetupColumn("TexId");
+                TableSetupColumn("pos", ImGuiTableColumnFlags.WidthStretch);
+                TableSetupColumn("color", ImGuiTableColumnFlags.WidthStretch);
+                TableSetupColumn("tex");
+                TableSetupColumn("texId");
                 TableHeadersRow();
 
                 int selectedRangeLower = selectedVertexIndex / 3 * 3;
@@ -355,7 +355,7 @@ public class DebugRenderer : IDisposable
 
         float deg = q.W * 180;
         AlignTextToFramePadding();
-        Text("Quat W:"); SameLine();
+        Text("quat W:"); SameLine();
         SetNextItemWidth(100);
         if (DragFloat(label + "quatw", ref deg, 1f, -179.5f, 179.5f, "%.1f"))
         {
@@ -364,7 +364,7 @@ public class DebugRenderer : IDisposable
             mesh.DirtyModel = true;
         }
         SameLine();
-        if (Button("Reset"))
+        if (Button("reset"))
         {
             q = Quaternion.Identity;
             mesh.DirtyModel = true;
