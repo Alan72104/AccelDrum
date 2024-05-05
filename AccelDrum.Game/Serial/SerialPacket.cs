@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -60,6 +61,7 @@ public struct SerialPacket
     /// Asserts that the managed size of <typeparamref name="T"/> is equal to <see cref="SizeInner"/>
     /// </summary>
     /// <exception cref="InvalidOperationException">When sizes don't match</exception>
+    [Conditional("DEBUG")]
     public static void CheckInnerSize<T>() where T : struct
     {
         int size = Unsafe.SizeOf<T>();

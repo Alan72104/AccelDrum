@@ -1,6 +1,6 @@
 ﻿using AccelDrum.Game.Serial;
 using OpenTK.Mathematics;
-using System;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -107,8 +107,8 @@ public struct ConfigurePacket
 
     public unsafe ref T GetDataAs<T>() where T : struct
     {
-        if (Unsafe.SizeOf<T>() > Unsafe.SizeOf<ExtraData>())
-            throw new InvalidOperationException($"Size to cast to should be equal to or less than ConfigurePacket.ExtraData");
+        Debug.Assert(Unsafe.SizeOf<T>() <= Unsafe.SizeOf<ExtraData>(),
+            $"Size to cast to should be equal to or less than ConfigurePacket.ExtraData");
         fixed (ExtraData* ptr = &Data)
             return ref Unsafe.AsRef<T>(ptr); // Super unsafe workaround for referencing self (ref Data)
     }
