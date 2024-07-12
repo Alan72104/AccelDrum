@@ -68,6 +68,7 @@ public static class ShapeUtils
         h /= 2;
         float[] floats =
         {
+            // Front
             -w, -h, l, 0, 0,
             w, -h, l, 1, 0,
             w, h, l, 1, 1,
@@ -93,10 +94,10 @@ public static class ShapeUtils
             w, h, -l, 1, 1,
             -w, h, -l, 0, 1,
 
-            -w, -h, l, 0, 0,
-            w, -h, l, 1, 0,
-            w, -h, -l, 1, 1,
-            -w, -h, -l, 0, 1,
+            w, -h, l, 0, 0,
+            -w, -h, l, 1, 0,
+            -w, -h, -l, 1, 1,
+            w, -h, -l, 0, 1,
         };
         List<Vertex> vertices = VerticesFromRaw(floats);
         List<uint> indices = new()

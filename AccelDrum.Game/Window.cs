@@ -12,6 +12,7 @@ using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using System;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using Vector3 = OpenTK.Mathematics.Vector3;
 
@@ -45,10 +46,12 @@ public class Window : GameWindow
     private Mesh meshMain = null!;
     private Mesh meshCubes = null!;
     private Mesh meshGround = null!;
+    private Mesh meshCube = null!;
     private Mesh meshDebug = null!;
     private Texture textureContainer = null!;
     private Texture textureCea7d = null!;
 
+    [DynamicDependency(nameof(OpenTK.Graphics.OpenGL4.GL.LoadBindings), typeof(OpenTK.Graphics.OpenGL4.GL))]
     public Window() : base(
         GameWindowSettings.Default,
         new NativeWindowSettings()
@@ -75,6 +78,7 @@ public class Window : GameWindow
         meshMain = meshManager.CreateMesh("main", shaderMain);
         meshCubes = meshManager.CreateMesh("cubes", shaderMain);
         meshGround = meshManager.CreateMesh("ground", shaderGround);
+        meshCube = meshManager.CreateMesh("cube", shaderMain);
         meshDebug = meshManager.CreateMesh("debug", shaderMain);
 
         uniformView = meshManager.CreateGlobalUniform<Matrix4>("view");
@@ -83,19 +87,22 @@ public class Window : GameWindow
         uniformAmbientStrength = meshManager.CreateGlobalUniform<float>("ambientStrength");
         uniformTime = meshManager.CreateGlobalUniform<float>("time");
 
+        textureContainer = meshManager.CreateTexture("container", "Resources/container.jpg");
+        textureCea7d = meshManager.CreateTexture("cea7d", "Resources/cea7d.png");
+
         DebugRenderer.Init(meshDebug);
 
         const float groundSizeHalf = 10;
         meshGround.Vertices.AddRange(ShapeUtils.Quad(
-            new Vector3(-groundSizeHalf, 0, -groundSizeHalf),
-            new Vector3(groundSizeHalf, 0, -groundSizeHalf),
+            new Vector3(-groundSizeHalf, 0, groundSizeHalf),
             new Vector3(groundSizeHalf, 0, groundSizeHalf),
-            new Vector3(-groundSizeHalf, 0, groundSizeHalf)
+            new Vector3(groundSizeHalf, 0, -groundSizeHalf),
+            new Vector3(-groundSizeHalf, 0, -groundSizeHalf)
         ));
         meshGround.Position = new Vector3(0, -0.01f, 0);
 
-        textureContainer = meshManager.CreateTexture("container", "Resources/container.jpg");
-        textureCea7d = meshManager.CreateTexture("cea7d", "Resources/cea7d.png");
+        (meshCube.Vertices, meshCube.Indexes) = ShapeUtils.CubeWithTexture(1.0f);
+        meshCube.Texture = textureContainer;
 
         initImGuiController();
         ImGui.GetStyle().WindowRounding = 9;
@@ -280,10 +287,15 @@ public class Window : GameWindow
         uniformAmbientColor.Value = ambientColor;
         uniformAmbientStrength.Value = ambientStrength;
         uniformTime.Value = (float)gameTimer.Elapsed.TotalSeconds;
+
+        GL.Enable(EnableCap.CullFace);
         meshGround.Draw();
         meshMain.Draw();
         meshCubes.Draw();
+        meshCube.Draw();
         accel.Draw();
+
+        GL.Disable(EnableCap.CullFace);
         DebugRenderer.Ins.Draw();
 
         _controller.Render();

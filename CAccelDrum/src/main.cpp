@@ -316,6 +316,7 @@ class TaskTimeoutCallback : public Runnable
 static TaskTimeoutCallback timeoutCallback;
 
 void loop() {
+    display.clear();
     display.printf(0, 0, "Set sched");
     display.update();
     scheduler.setTaskTimeout(TIMEOUT_2S);
@@ -326,6 +327,7 @@ void loop() {
     scheduler.schedule(receivePackets);
     scheduler.schedule(&display);
     scheduler.schedule(&serial);
+    display.clear();
     display.printf(0, 0, "Sched run");
     display.update();
     scheduler.execute(); // Does not return
